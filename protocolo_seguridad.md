@@ -4,13 +4,16 @@
 
 Nunca se trabaja sobre la base original. Se crea una copia de trabajo a partir de una plantilla intocable.
 
-```bash
+```powershell
+# PostgreSQL 18 se instalo en: C:\Program Files\PostgreSQL\18\bin
+# (agregar esa carpeta al PATH de Windows, o usar la ruta completa)
+
 # Crear la plantilla (una sola vez)
-createdb plantilla_base
-psql -d plantilla_base -f schema.sql
+createdb -U postgres plantilla_base
+psql -U postgres -d plantilla_base -f schema.sql
 
 # Crear la copia de trabajo
-createdb -T plantilla_base copia_trabajo
+createdb -U postgres -T plantilla_base copia_trabajo
 ```
 
 - `plantilla_base`: esquema limpio, no se modifica nunca.
@@ -21,8 +24,9 @@ createdb -T plantilla_base copia_trabajo
 
 Todo script que escribe (INSERT, UPDATE, DELETE, CREATE, ALTER, DROP) se ejecuta primero dentro de BEGIN/ROLLBACK para inspeccionar el efecto antes de confirmar.
 
-```bash
-psql -d copia_trabajo
+```powershell
+# Conectarse a la copia de trabajo
+psql -U postgres -d copia_trabajo
 ```
 
 ```sql
@@ -45,15 +49,16 @@ Regla: siempre empezar con ROLLBACK hasta estar seguro.
 
 Antes de cualquier cambio estructural (ALTER, DROP, CREATE TRIGGER, etc.), se exporta la copia de trabajo para poder volver atrás sin depender del ROLLBACK.
 
-```bash
-pg_dump -Fc copia_trabajo > respaldos/copia_trabajo_$(date +%Y%m%d_%H%M%S).dump
+```powershell
+# Respaldo antes de cualquier cambio estructural
+pg_dump -U postgres -Fc copia_trabajo > "respaldos\copia_trabajo_$(Get-Date -Format yyyyMMdd_HHmmss).dump"
 ```
 
-Los respaldos se guardan en la carpeta `respaldos/` dentro del proyecto.
+Los respaldos se guardan en la carpeta `respaldos\` dentro del proyecto.
 
-```bash
+```powershell
 # Para restaurar un respaldo
-dropdb copia_trabajo
-createdb -T plantilla_base copia_trabajo
-pg_restore -d copia_trabajo respaldos/copia_trabajo_YYYYMMDD_HHMMSS.dump
+dropdb -U postgres copia_trabajo
+createdb -U postgres -T plantilla_base copia_trabajo
+pg_restore -U postgres -d copia_trabajo "respaldos\copia_trabajo_YYYYMMDD_HHMMSS.dump"
 ```
