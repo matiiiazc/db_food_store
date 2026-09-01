@@ -1,0 +1,18 @@
+# DUIA — TP3: Optimización de Consultas (Unidad 2, Semana 3)
+
+> Declaración de Uso de IA. Una fila por cada uso relevante de IA durante la práctica.
+> Herramienta: **OpenCode** (motor primario de la cátedra). Toda propuesta se validó con EXPLAIN ANALYZE real sobre `food_store_tp3`.
+
+| Herramienta | Para qué se usó | Prompt / spec (resumen) | Se aceptó / se descartó — por qué |
+|---|---|---|---|
+| OpenCode | Generar el script de carga masiva (Parte 1) | "Generá un script SQL para PostgreSQL que inserte 50.000 filas en producto distribuidas parejo entre las categorías existentes, 20.000 clientes y 200.000 pedidos con sus detalles, usando generate_series, sin PL/pgSQL si no hace falta." | **Aceptado** (ejecutado con OK) tras leerlo línea por línea y comprobar que respeta CHECK/UNIQUE/FK y corre dentro de BEGIN...COMMIT sobre la copia de trabajo. |
+| OpenCode | Decidir cómo cargar con los triggers del TP2 (Parte 1) | "Los triggers de stock y subtotal van a interferir con el bulk insert de 600.000 detalles; ¿cómo se resuelve profesionalmente?" | **Aceptado**: desactivar los triggers durante el seed (`DISABLE TRIGGER ALL`) y reactivarlos al final. Verificado que quedaron en estado `O` (habilitados) tras la carga. |
+| OpenCode | Elegir consultas lentas de reporting (Parte 2) | "Elegí 3 consultas reales de reporting sobre el modelo que sean lentas a esta escala y que ningún índice del esquema base resuelva." | **Aceptado**, ajustado luego de medir: el primer intento (consultas 2 y 3) resultó demasiado rápido, se reformuló a consultas que producen Seq Scan/agregación pesada real. |
+| OpenCode | Proponer índice/reescritura por consulta (Parte 2) a partir del plan real | "Este es el plan EXACT (pego el texto del plan). ¿Qué reescritura o índice mejoraría este plan y por qué?" | **Aceptado** (consulta 1): reescritura + índice de cobertura → 994→290 ms (3,4×). **Descartado** (consulta 3): índice por fecha no mejoró el sort de 27 MB. **Documentado** (consulta 2): índice cambió el plan (Seq→Bitmap) pero el tiempo no mejoró por el rango poco selectivo. |
+| OpenCode | Explicar un plan en lenguaje natural (Parte 3) para lectura crítica | "Explicá este plan de EXPLAIN ANALYZE nodo por nodo en lenguaje natural" (plan con COSTS OFF). | La explicación generada se **auditó y se marcaron 4 imprecisiones reales**: confundió cost con milisegundos, atribuyó el costo al nodo equivocado (dijo que el Hash Join es lo más caro cuando lo es el GroupAggregate), malinterpretó el LIMIT (dijo "ordena 20 filas" cuando agrega 50.000), y citó un "cost 29894" que no está en el plan (COSTS OFF). Se documenta en `informe_parte3.md`. |
+| OpenCode | Consultas bajo spec + verificación de equivalencia (Parte 4) | Spec 1 (agregación LEFT JOIN con cantidad por categoría vigente) y Spec 2 (productos cuyo total vendido supera el promedio). | **Aceptado**: ambas versions se verificaron formalmente equivalentes con EXCEPT (0 filas en los dos sentidos en cada par). |
+| OpenCode | Redactar este TP y la bitácora | Documentación de decisiones, informe comparativo y defensa oral. | **Aceptado** como soporte documental; los datos de los planes provienen de EXPLAIN ANALYZE real, no de estimaciones. |
+
+## Nota sobre el criterio de aceptación
+
+En toda la práctica **ninguna propuesta se aplicó "porque lo dijo la IA"**: cada cambio se fundó en el plan real (`EXPLAIN ANALYZE`) y se confirmó (o refutó) con la medición posterior. La propuesta que mejoró (consulta 1) se mantuvo; la que no mejoró (consulta 3) se documentó en vez de descartarse en silencio; la que cambió el plan pero no el tiempo (consulta 2) se explicó por la selectividad del rango.
