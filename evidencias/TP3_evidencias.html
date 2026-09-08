@@ -1,0 +1,547 @@
+<!DOCTYPE html><html lang="es"><head><meta charset="utf-8"><title>TP3 — Optimizacion de consultas: evidencia de codigo y planes reales</title><style>
+body { background:#0d1117; color:#c9d1d9; font-family:'Segoe UI',Roboto,sans-serif; margin:0; padding:26px; }
+h1 { font-size:21px; color:#ffffff; margin:0 0 3px 0; }
+.docsub { color:#8b949e; margin-bottom:20px; font-size:13px; }
+.sec { background:#161b22; border:1px solid #30363d; border-radius:8px; margin:0 0 22px 0; overflow:hidden;
+       page-break-inside:avoid; }
+.sechead { background:#1f2630; padding:9px 14px; border-bottom:1px solid #30363d; }
+.sechead-title { font-weight:700; color:#ffffff; font-size:14px; letter-spacing:.02em; }
+.sechsub { color:#8b949e; font-size:12px; margin-top:2px; }
+pre { margin:0; padding:14px 16px; overflow-x:auto; }
+code { font-family:Consolas,'Cascadia Code',monospace; font-size:12.5px; line-height:1.55; }
+.k  { color:#79c0ff; }
+.s  { color:#a5d6ff; }
+.c  { color:#8b949e; font-style:italic; }
+.n  { color:#f0a63a; }
+.t  { color:#56d364; }
+.tt { color:#ff7b72; font-weight:600; }
+.pt { color:#d2a8ff; }
+.rr { color:#ff7b72; }
+.hh { color:#56d364; }
+</style></head><body><h1>TP3 — Optimizacion de consultas: evidencia de codigo y planes reales</h1><div class="docsub">Captura por seccion con Win+Shift+S · Scripts de las partes 1, 2, 4 y 5 con EXPLAIN ANALYZE real antes/despues</div><div class="sec"><div class="sechead"><span class="sechead-title">TP3 · Parte 1 · carga_masiva.sql — desactivado de triggers (seed) y categorias base</span><div class="sechsub">Protocolo: BEGIN, DISABLE TRIGGER durante el seed, categorias ON CONFLICT DO NOTHING</div></div><pre><code><span class="c">-- ============================================================</span>
+<span class="c">-- FOOD STORE - TP3 - Parte 1: carga masiva (seed voluminoso)</span>
+<span class="c">-- ============================================================</span>
+<span class="c">-- Objetivo: poblar la base para que los planes de ejecucion sean</span>
+<span class="c">-- lentos a escala real (Seq Scan) y la optimizacion sea medible.</span>
+<span class="c">--</span>
+<span class="c">-- Volumen objetivo (consigna del TP3):</span>
+<span class="c">--   * &gt;= 50.000 productos  distribuidos entre categorias existentes</span>
+<span class="c">--   * 20.000 clientes</span>
+<span class="c">--   * 200.000 pedidos con sus detalles (detalle_pedido)</span>
+<span class="c">--</span>
+<span class="c">-- PROTOCOLO DE SEGURIDAD (catedra): copia, transaccion, respaldo.</span>
+<span class="c">--   Este script corre sobre food_store_tp3 (copia de trabajo),</span>
+<span class="c">--   NUNCA sobre plantilla_base. Previamente se tomo un pg_dump.</span>
+<span class="c">--</span>
+<span class="c">-- DECISION JUSTIFICADA sobre los triggers de la Parte 1 del TP2:</span>
+<span class="c">--   Las 3 restricciones (baja logica, stock, subtotal) estan</span>
+<span class="c">--   pensadas para operacion transaccional de a-uno. Durante un</span>
+<span class="c">--   bulk insert masivo el trigger de stock haria centenares de</span>
+<span class="c">--   miles de SELECT + UPDATE de una fila (lentisimo) y dejaria</span>
+<span class="c">--   los stocks en negativo. Lo profesional es DESACTIVAR los</span>
+<span class="c">--   triggers durante la carga y REACTIVARLOS al final, porque:</span>
+<span class="c">--     1) la carga es un seed, no una venta real (no debe disparar</span>
+<span class="c">--        la logica de negocio del TP2);</span>
+<span class="c">--     2) se restaura el estado exacto antes/despues.</span>
+<span class="c">--   Se documenta en la DUIA como decision aceptada y reversible.</span>
+<span class="c">--   (No se desactiva trg_*_no_delete porque no se hace DELETE.)</span>
+<span class="c">-- ============================================================</span>
+
+<span class="k">BEGIN</span>;
+
+<span class="c">-- ------------------------------------------------------------</span>
+<span class="c">-- Paso 0: desactivar triggers de negocio durante el seed</span>
+<span class="c">-- ------------------------------------------------------------</span>
+<span class="k">ALTER</span> <span class="k">TABLE</span> detalle_pedido DISABLE <span class="k">TRIGGER</span> ALL;
+<span class="k">ALTER</span> <span class="k">TABLE</span> producto        DISABLE <span class="k">TRIGGER</span> ALL;
+<span class="k">ALTER</span> <span class="k">TABLE</span> categoria       DISABLE <span class="k">TRIGGER</span> ALL;
+
+<span class="c">-- ------------------------------------------------------------</span>
+<span class="c">-- Paso 1: categorias base (si no existen)</span>
+<span class="c">-- ------------------------------------------------------------</span>
+<span class="k">INSERT</span> <span class="k">INTO</span> categoria (nombre) <span class="k">VALUES</span>
+    (<span class="s">'Pizzas'</span>),
+    (<span class="s">'Empanadas'</span>),
+    (<span class="s">'Bebidas'</span>),
+    (<span class="s">'Postres'</span>)
+<span class="k">ON</span> CONFLICT (nombre) <span class="k">DO</span> NOTHING;
+
+<span class="c">-- ------------------------------------------------------------</span>
+</code></pre></div>
+<div class="sec"><div class="sechead"><span class="sechead-title">TP3 · Parte 1 · carga_masiva.sql — 50.000 productos + 20.000 clientes</span><div class="sechsub">generate_series, precios 500-5000, stock 0-200, repartidos en 4 categorias; 20.000 clientes</div></div><pre><code> <span class="n">50.000</span> productos distribuidos entre categorias
+<span class="c">--   Precio entre 500 y 5000, stock aleatorio 0..200.</span>
+<span class="c">--   generate_series de 1..50000; se reparten 4 categorias.</span>
+<span class="c">-- ------------------------------------------------------------</span>
+<span class="k">INSERT</span> <span class="k">INTO</span> producto (nombre, descripcion, precio, stock, activo, categoria_id)
+<span class="k">SELECT</span>
+    <span class="s">'Producto '</span> || g,                                  <span class="c">-- nombre unico</span>
+    <span class="s">'Descripcion generada para el producto '</span> || g,
+    <span class="k">round</span>((<span class="n">500</span> + random() * <span class="n">4500</span>)::<span class="k">numeric</span>, <span class="n">2</span>),        <span class="c">-- precio 500..5000</span>
+    floor(random() * <span class="n">201</span>)::int,                        <span class="c">-- stock 0..200</span>
+    <span class="k">TRUE</span>,
+    (<span class="k">SELECT</span> id <span class="k">FROM</span> categoria <span class="k">WHERE</span> nombre = (ARRAY[<span class="s">'Pizzas'</span>,<span class="s">'Empanadas'</span>,<span class="s">'Bebidas'</span>,<span class="s">'Postres'</span>])[<span class="n">1</span> + (g % <span class="n">4</span>)]) <span class="c">-- reparto parejo</span>
+<span class="k">FROM</span> generate_series(<span class="n">1</span>, <span class="n">50000</span>) <span class="k">AS</span> g;
+
+<span class="c">-- ------------------------------------------------------------</span>
+<span class="c">-- Paso 3: 20.000 clientes</span>
+<span class="c">-- ------------------------------------------------------------</span>
+<span class="k">INSERT</span> <span class="k">INTO</span> cliente (nombre, apellido, email, telefono)
+<span class="k">SELECT</span>
+    <span class="s">'Nombre'</span> || g,
+    <span class="s">'Apellido'</span> || g,
+    <span class="s">'cliente'</span> || g || <span class="s">'@foodstore.com'</span>,
+    <span class="s">'11'</span> || lpad(g::text, <span class="n">8</span>, <span class="s">'0'</span>)
+<span class="k">FROM</span> generate_series(<span class="n">1</span>, <span class="n">20000</span>) <span class="k">AS</span> g;
+
+<span class="c">-- ------------------------------------------------------------</span>
+</code></pre></div>
+<div class="sec"><div class="sechead"><span class="sechead-title">TP3 · Parte 1 · carga_masiva.sql — 200.000 pedidos + 600.000 detalles y ANALYZE final</span><div class="sechsub">3 lineas por pedido con producto distinto (unicidad) + ANALYZE para estadisticas</div></div><pre><code><span class="c">-- Paso 4: 200.000 pedidos con detalles</span>
+<span class="c">--   Cada pedido tiene 1..4 lineas de detalle con cantidad 1..9.</span>
+<span class="c">--   El trigger de subtotal esta desactivado, pero igual cargamos</span>
+<span class="c">--   subtotal = cantidad * precio_unitario (consistente).</span>
+<span class="c">-- ------------------------------------------------------------</span>
+<span class="k">WITH</span> pedidos <span class="k">AS</span> (
+    <span class="k">SELECT</span>
+        g <span class="k">AS</span> n,
+        now() - (random() * interval <span class="s">'400 days'</span>) <span class="k">AS</span> fecha,
+        (ARRAY[<span class="s">'EFECTIVO'</span>,<span class="s">'TARJETA'</span>,<span class="s">'TRANSFERENCIA'</span>])[<span class="n">1</span> + floor(random()*<span class="n">3</span>)::int]::forma_pago_enum <span class="k">AS</span> fp,
+        <span class="n">1</span> + floor(random() * <span class="n">20000</span>)::int <span class="k">AS</span> cliente_id
+    <span class="k">FROM</span> generate_series(<span class="n">1</span>, <span class="n">200000</span>) <span class="k">AS</span> g
+)
+<span class="k">INSERT</span> <span class="k">INTO</span> pedido (fecha, forma_pago, cliente_id)
+<span class="k">SELECT</span> fecha, fp, cliente_id <span class="k">FROM</span> pedidos;
+
+<span class="c">-- Detalles: para cada pedido, 2..4 lineas de detalle (cada una con</span>
+<span class="c">-- un producto distinto dentro del mismo pedido, respetando</span>
+<span class="c">-- uq_detalle_pedido_producto). cantidad 1..9, subtotal consistente.</span>
+<span class="c">-- Se usa generate_series para las lineas y se asigna un producto</span>
+<span class="c">-- diferente a cada linea del mismo pedido (desplazamiento por linea)</span>
+<span class="c">-- para evitar colisiones de unicidad dentro de un pedido.</span>
+<span class="c">-- Volumen: 200.000 pedidos x 3 lineas en promedio = ~600.000 detalles.</span>
+<span class="k">INSERT</span> <span class="k">INTO</span> detalle_pedido (pedido_id, producto_id, cantidad, precio_unitario, subtotal)
+<span class="k">SELECT</span>
+    p.id,
+    <span class="n">1</span> + ((p.id * <span class="n">7</span> + linea) % <span class="n">50000</span>)::int <span class="k">AS</span> producto_id,  <span class="c">-- producto distinto por linea</span>
+    <span class="n">1</span> + floor(random() * <span class="n">9</span>)::int           <span class="k">AS</span> cantidad,
+    pr.precio,
+    pr.precio * (<span class="n">1</span> + floor(random() * <span class="n">9</span>)::int) <span class="k">AS</span> subtotal
+<span class="k">FROM</span> generate_series(<span class="n">1</span>, <span class="n">200000</span>) <span class="k">AS</span> g
+<span class="k">JOIN</span> LATERAL (<span class="k">SELECT</span> id <span class="k">FROM</span> pedido <span class="k">WHERE</span> id = g) p <span class="k">ON</span> <span class="k">true</span>
+<span class="k">CROSS</span> <span class="k">JOIN</span> generate_series(<span class="n">0</span>, <span class="n">2</span>) <span class="k">AS</span> linea            <span class="c">-- 3 lineas por pedido</span>
+<span class="k">CROSS</span> <span class="k">JOIN</span> LATERAL (
+    <span class="k">SELECT</span> precio <span class="k">FROM</span> producto <span class="k">WHERE</span> id = <span class="n">1</span> + ((g * <span class="n">7</span> + linea) % <span class="n">50000</span>)::int
+) pr;
+
+<span class="c">-- ------------------------------------------------------------</span>
+<span class="c">-- Paso 5: ANALYZE para refrescar estadisticas del optimizador</span>
+<span class="c">-- ------------------------------------------------------------</span>
+ANALYZE categoria;
+ANALYZE producto;
+ANALYZE cliente;
+ANALYZE pedido;
+ANALYZE detalle_pedido;
+
+<span class="c">-- ------------------------------------------------------------</span>
+<span class="c">-- Paso 6: reactivar triggers de negocio (estado original)</span>
+<span class="c">-- ------------------------------------------------------------</span>
+<span class="k">ALTER</span> <span class="k">TABLE</span> detalle_pedido ENABLE <span class="k">TRIGGER</span> ALL;
+<span class="k">ALTER</span> <span class="k">TABLE</span> producto        ENABLE <span class="k">TRIGGER</span> ALL;
+<span class="k">ALTER</span> <span class="k">TABLE</span> categoria       ENABLE <span class="k">TRIGGER</span> ALL;
+
+<span class="k">COMMIT</span>;
+
+<span class="c">-- ------------------------------------------------------------</span>
+<span class="c">-- Verificacion de conteos (despues del COMMIT)</span>
+<span class="c">-- ------------------------------------------------------------</span>
+<span class="k">SELECT</span> <span class="s">'categoria'</span> <span class="k">AS</span> tabla, <span class="k">count</span>(*) <span class="k">FROM</span> categoria
+<span class="k">UNION</span> ALL <span class="k">SELECT</span> <span class="s">'producto'</span>, <span class="k">count</span>(*) <span class="k">FROM</span> producto
+<span class="k">UNION</span> ALL <span class="k">SELECT</span> <span class="s">'cliente'</span>,  <span class="k">count</span>(*) <span class="k">FROM</span> cliente
+<span class="k">UNION</span> ALL <span class="k">SELECT</span> <span class="s">'pedido'</span>,   <span class="k">count</span>(*) <span class="k">FROM</span> pedido
+<span class="k">UNION</span> ALL <span class="k">SELECT</span> <span class="s">'detalle_pedido'</span>, <span class="k">count</span>(*) <span class="k">FROM</span> detalle_pedido;
+</code></pre></div>
+<div class="sec"><div class="sechead"><span class="sechead-title">TP3 · Parte 1 · Verificacion de conteos (salida real de psql)</span><div class="sechsub">Cumple y supera los minimos de la consigna (50k/20k/200k)</div></div><pre><code>     tabla      | count
+----------------+--------
+ categoria      |      4
+ cliente        |  20000
+ producto       |  50000
+ pedido         | 200000
+ detalle_pedido | 600000
+(5 filas)</code></pre></div>
+<div class="sec"><div class="sechead"><span class="sechead-title">TP3 · Parte 2 · consultas_lentas.sql — las 3 consultas de reporting</span><div class="sechsub">Sin indice util en el esquema base: Seq Scan y agregaciones pesadas esperadas</div></div><pre><code><span class="c">-- ============================================================</span>
+<span class="c">-- FOOD STORE - TP3 - Parte 2: consultas lentas y EXPLAIN ANALYZE</span>
+<span class="c">-- ============================================================</span>
+<span class="c">-- Consultas elegidas (variantes propias sobre el modelo) que a</span>
+<span class="c">-- esta escala vuelven lentas. Antes de cualquier cambio se guarda</span>
+<span class="c">-- el plan completo de cada una.</span>
+<span class="c">--</span>
+<span class="c">-- Los tres son queries de REPORTING reales sobre el modelo, de las</span>
+<span class="c">-- que el optimizador no puede resolver con los indices del esquema</span>
+<span class="c">-- base (schema.sql) y por eso producen Seq Scan / agregaciones</span>
+<span class="c">-- pesadas sobre las 600.000 lineas de detalle_pedido.</span>
+<span class="c">-- ============================================================</span>
+
+<span class="c">-- CONSULTA 1: resumen de ventas por producto (unidades y total).</span>
+<span class="c">-- Escanea 600.000 lineas de detalle, JOIN con producto y agrega por</span>
+<span class="c">-- producto. No hay indice util para la agregacion; usa HashAggregate</span>
+<span class="c">-- con spool a disco.</span>
+EXPLAIN ANALYZE
+<span class="k">SELECT</span> pr.nombre,
+       <span class="k">count</span>(*)         <span class="k">AS</span> lineas,
+       <span class="k">sum</span>(dp.cantidad) <span class="k">AS</span> unidades,
+       <span class="k">sum</span>(dp.subtotal) <span class="k">AS</span> total_vendido
+<span class="k">FROM</span> detalle_pedido dp
+<span class="k">JOIN</span> producto pr <span class="k">ON</span> pr.id = dp.producto_id
+<span class="k">GROUP</span> <span class="k">BY</span> pr.nombre
+<span class="k">ORDER</span> <span class="k">BY</span> total_vendido <span class="k">DESC</span>
+<span class="k">LIMIT</span> <span class="n">20</span>;
+
+<span class="c">-- CONSULTA 2: facturacion por rango de fechas (reporte mensual).</span>
+<span class="c">-- Filtra pedidos por fecha y los cruza con su cliente para el</span>
+<span class="c">-- listado de facturas. No existe indice sobre pedido.fecha, por lo</span>
+<span class="c">-- que se hace Seq Scan sobre las 200.000 filas de pedido.</span>
+EXPLAIN ANALYZE
+<span class="k">SELECT</span> p.id <span class="k">AS</span> nro_factura, p.fecha, p.forma_pago, c.nombre <span class="k">AS</span> cliente
+<span class="k">FROM</span> pedido p
+<span class="k">JOIN</span> cliente c <span class="k">ON</span> c.id = p.cliente_id
+<span class="k">WHERE</span> p.fecha &gt;= <span class="s">'2025-01-01'</span>
+  <span class="k">AND</span> p.fecha &lt;  <span class="s">'2026-01-01'</span>
+<span class="k">ORDER</span> <span class="k">BY</span> p.fecha, p.id;
+
+<span class="c">-- CONSULTA 3: total vendido por mes (historicos).</span>
+<span class="c">-- Cruza detalle (600.000 filas) con pedido para filtrar por fecha y</span>
+<span class="c">-- luego agrega por mes (date_trunc). Agregacion pesada de reporte.</span>
+EXPLAIN ANALYZE
+<span class="k">SELECT</span> to_char(date_trunc(<span class="s">'month'</span>, p.fecha), <span class="s">'YYYY-MM'</span>) <span class="k">AS</span> mes,
+       <span class="k">sum</span>(dp.subtotal)                                 <span class="k">AS</span> total_mes,
+       <span class="k">count</span>(<span class="k">distinct</span> p.id)                             <span class="k">AS</span> pedidos_mes
+<span class="k">FROM</span> detalle_pedido dp
+<span class="k">JOIN</span> pedido p <span class="k">ON</span> p.id = dp.pedido_id
+<span class="k">GROUP</span> <span class="k">BY</span> date_trunc(<span class="s">'month'</span>, p.fecha)
+<span class="k">ORDER</span> <span class="k">BY</span> mes;
+</code></pre></div>
+<div class="sec"><div class="sechead"><span class="sechead-title">TP3 · Parte 2 · PLAN ANTES — Consulta 1 (resumen de ventas): Parallel Seq Scan + spool a disco — 994 ms</span><div class="sechsub">Nodo dominante: Parallel Seq Scan (600.000 filas) y HashAggregate con spool a disco</div></div><pre><code> Limit  (cost=60128.04..60128.09 <span class="t">rows=20</span> width=62) (<span class="t">actual time=964.453..999.509</span> <span class="t">rows=20.00</span> loops=1)
+   -&gt;  Sort  ...  Sort Method: top-N heapsort  Memory: 27kB
+         -&gt;  Finalize GroupAggregate  (cost=42696.58..58797.56 <span class="t">rows=50000</span>)
+               Group Key: pr.nombre
+               -&gt;  Gather Merge  (cost=42696.58..56672.56 <span class="t">rows=120000</span>)
+                     -&gt;  Partial HashAggregate  ...  Batches: 5  Disk Usage: 8241kB
+                           -&gt;  Hash Join
+                                 -&gt;  Parallel Seq Scan on detalle_pedido dp
+                                 -&gt;  Hash  ...  -&gt;  Seq Scan on producto pr
+ <span class="pt">Planning Time: 8.544 ms</span>
+ <span class="tt">Execution Time: 993.806 ms</span></code></pre></div>
+<div class="sec"><div class="sechead"><span class="sechead-title">TP3 · Parte 2 · PLAN ANTES — Consulta 2 (facturacion por fecha): Seq Scan pedido — 114 ms</span><div class="sechsub">Recorre 200.000 pedidos para quedarse con 78.840 del rango (no existia indice por fecha)</div></div><pre><code> Sort  (cost=13805.87..14001.15 <span class="t">rows=78111</span> width=31) (<span class="t">actual time=88.252..94.711</span> <span class="t">rows=77840.00</span> loops=1)
+   Sort Method: external merge  Disk: 3168kB
+   -&gt;  Hash Join
+         Hash Cond: (p.cliente_id = c.id)
+         -&gt;  Seq Scan on pedido p
+               Filter: ((fecha &gt;= ...) AND (fecha &lt; ...))
+               <span class="rr">Rows Removed by Filter: 122160</span>
+         -&gt;  Hash -&gt; Seq Scan on cliente c
+ <span class="pt">Planning Time: 8.640 ms</span>
+ <span class="tt">Execution Time: 113.874 ms</span></code></pre></div>
+<div class="sec"><div class="sechead"><span class="sechead-title">TP3 · Parte 2 · PLAN ANTES — Consulta 3 (total por mes): sort a disco 27 MB — 1.734 ms</span><div class="sechsub">Lo más caro: ordenar 600.000 filas por mes con sort a disco (27 MB)</div></div><pre><code> Sort  (cost=137102.48..137602.48 <span class="t">rows=200000</span> width=80) (<span class="t">actual time=1711.741..1711.746</span> <span class="t">rows=15.00</span> loops=1)
+   Sort Method: quicksort
+   -&gt;  GroupAggregate
+         Group Key: (date_trunc('month'::text, p.fecha))
+         -&gt;  Sort  (cost=100602.84..102102.84 <span class="t">rows=600000</span> width=32)
+               Sort Method: external merge  Disk: 27136kB
+               -&gt;  Hash Join  (dp.pedido_id = p.id)
+                     -&gt;  Seq Scan on detalle_pedido dp  <span class="t">rows=600000</span>
+ <span class="pt">Planning Time: 1.332 ms</span>
+ <span class="tt">Execution Time: 1734.203 ms</span></code></pre></div>
+<div class="sec"><div class="sechead"><span class="sechead-title">TP3 · Parte 2 · optimizaciones.sql — indice de cobertura + indice por fecha</span><div class="sechsub">idx_detalle_producto_cover (producto_id) INCLUDE (cantidad, subtotal) + idx_pedido_fecha</div></div><pre><code><span class="c">-- ============================================================</span>
+<span class="c">-- FOOD STORE - TP3 - Parte 2: cambios propuestos por la IA</span>
+<span class="c">-- ============================================================</span>
+<span class="c">-- Cada cambio justificado en terminos del plan REAL obtenido con</span>
+<span class="c">-- consultas_lentas.sql. Se aplica sobre la copia de trabajo y se</span>
+<span class="c">-- vuelve a medir con EXPLAIN ANALYZE.</span>
+<span class="c">--</span>
+<span class="c">-- CONSULTA 1 - resumen de ventas por producto:</span>
+<span class="c">--   El plan hace "Parallel Seq Scan on detalle_pedido dp"</span>
+<span class="c">--   (600.000 filas) + HashAggregate con spool a disco</span>
+<span class="c">--   (Batches: 5, Disk Usage ~7MB). El Query Scan de detalle lee</span>
+<span class="c">--   toda la tabla y despues agrega.</span>
+<span class="c">--   PROPUESTA: indice de cobertura que responda la agregacion con</span>
+<span class="c">--   Index Only Scan, evitando leer las filas del heap.</span>
+<span class="c">--   CREATE INDEX idx_detalle_producto_cover</span>
+<span class="c">--       ON detalle_pedido (producto_id) INCLUDE (cantidad, subtotal);</span>
+<span class="c">--   Ataca el nodo "Seq Scan on detalle_pedido".</span>
+<span class="c">--</span>
+<span class="c">-- CONSULTA 2 - facturacion por rango de fechas:</span>
+<span class="c">--   El plan hace "Seq Scan on pedido p" con</span>
+<span class="c">--   "Filter: (fecha &gt;= ... AND fecha &lt; ...)"</span>
+<span class="c">--   y "Rows Removed by Filter: 122160" (escanea 200.000 filas</span>
+<span class="c">--   para quedarse con 78.840). Actualmente NO hay indice por fecha.</span>
+<span class="c">--   PROPUESTA: CREATE INDEX ON pedido (fecha);</span>
+<span class="c">--   Ataca el nodo "Seq Scan on pedido" -&gt; Bitmap Index Scan.</span>
+<span class="c">--</span>
+<span class="c">-- CONSULTA 3 - total vendido por mes:</span>
+<span class="c">--   Lo mas caro es el "Sort Method: external merge Disk: 27136kB"</span>
+<span class="c">--   sobre las 600.000 filas y el "Hash Join" con</span>
+<span class="c">--   "Seq Scan on detalle_pedido dp". La Group Key es</span>
+<span class="c">--   date_trunc('month', fecha): si el pedido viene ordenado por</span>
+<span class="c">--   fecha (indice), el GroupAggregate puede leer en orden y parte</span>
+<span class="c">--   del sort desaparece.</span>
+<span class="c">--   PROPUESTA: se agrega (INDEX en pedido(fecha)) que tambien</span>
+<span class="c">--   alimenta a la consulta 3 ordenando por fecha.</span>
+<span class="c">-- ============================================================</span>
+
+<span class="k">BEGIN</span>;
+
+<span class="k">CREATE</span> <span class="k">INDEX</span> idx_detalle_producto_cover
+    <span class="k">ON</span> detalle_pedido (producto_id) <span class="k">INCLUDE</span> (cantidad, subtotal);
+
+<span class="k">CREATE</span> <span class="k">INDEX</span> idx_pedido_fecha
+    <span class="k">ON</span> pedido (fecha);
+
+ANALYZE detalle_pedido;
+ANALYZE pedido;
+
+<span class="k">COMMIT</span>;
+
+<span class="k">SELECT</span> <span class="s">'indices creados'</span> <span class="k">AS</span> estado;
+</code></pre></div>
+<div class="sec"><div class="sechead"><span class="sechead-title">TP3 · Parte 2 · Reescritura aplicada a Consulta 1 — agrupar por producto_id con Index Only Scan</span><div class="sechsub">El GROUP BY por producto_id (columna indexada) permite Index Only Scan; el join con producto se hace al final</div></div><pre><code><span class="k">SELECT</span> pr.nombre, v.unidades, v.total_vendido
+<span class="k">FROM</span> (
+    <span class="k">SELECT</span> producto_id, <span class="k">sum</span>(cantidad) <span class="k">AS</span> unidades, <span class="k">sum</span>(subtotal) <span class="k">AS</span> total_vendido
+    <span class="k">FROM</span> detalle_pedido
+    <span class="k">GROUP</span> <span class="k">BY</span> producto_id
+) v
+<span class="k">JOIN</span> producto pr <span class="k">ON</span> pr.id = v.producto_id
+<span class="k">ORDER</span> <span class="k">BY</span> v.total_vendido <span class="k">DESC</span>
+<span class="k">LIMIT</span> <span class="n">20</span>;</code></pre></div>
+<div class="sec"><div class="sechead"><span class="sechead-title">TP3 · Parte 2 · PLAN DESPUES — Consulta 1: Index Only Scan (Heap Fetches: 0) — 290 ms (3,4×)</span><div class="sechsub">Cost 60128→29894 · tiempo 994→290 ms · mejora 3,4×</div></div><pre><code> Limit  (cost=29894.85..29894.90 <span class="t">rows=20</span> width=54) (<span class="t">actual time=289.173..289.178</span> <span class="t">rows=20.00</span> loops=1)
+   -&gt;  Sort  ...  Sort Method: top-N heapsort
+         -&gt;  Hash Join
+               -&gt;  GroupAggregate
+                     Group Key: detalle_pedido.producto_id
+                     -&gt;  Index Only Scan using idx_detalle_producto_cover on detalle_pedido
+                           <span class="hh">Heap Fetches: 0</span>
+                           Index Searches: 1
+               -&gt;  Hash  -&gt;  Seq Scan on producto pr
+ <span class="pt">Planning Time: 8.230 ms</span>
+ <span class="tt">Execution Time: 289.977 ms</span></code></pre></div>
+<div class="sec"><div class="sechead"><span class="sechead-title">TP3 · Parte 2 · PLAN DESPUES — Consulta 2: Bitmap Index Scan on idx_pedido_fecha — 124 ms</span><div class="sechsub">Plan cambiado (Seq→Bitmap) pero tiempo similar: rango del 40,9% de la tabla poco selectivo (documentado)</div></div><pre><code> Sort  (cost=13656.33..13851.83 <span class="t">rows=78199</span> width=31) (<span class="t">actual time=98.845..105.558</span> <span class="t">rows=77840.00</span> loops=1)
+   Sort Method: external merge  Disk: 3168kB
+   -&gt;  Hash Join
+         -&gt;  Bitmap Heap Scan on pedido p
+               Recheck Cond: ((fecha &gt;= ...) AND (fecha &lt; ...))
+               -&gt;  Bitmap Index Scan on idx_pedido_fecha
+                     Index Cond: ((fecha &gt;= ...) AND (fecha &lt; ...))
+ <span class="pt">Planning Time: 13.504 ms</span>
+ <span class="tt">Execution Time: 124.416 ms</span></code></pre></div>
+<div class="sec"><div class="sechead"><span class="sechead-title">TP3 · Parte 2 · PLAN DESPUES — Consulta 3: sin mejora, se descarta con registro (1552 ms)</span><div class="sechsub">El indice por fecha no alimenta el Group Key (join por pedido_id, no por fecha). Se documenta, no se descarta en silencio</div></div><pre><code> Sort  (cost=137102.48..137602.48 <span class="t">rows=200000</span>) (<span class="t">actual time=1526.215..1526.219</span> <span class="t">rows=15.00</span> loops=1)
+   -&gt;  GroupAggregate
+         Group Key: (date_trunc('month'::text, p.fecha))
+         -&gt;  Sort  (cost=100602.84..102102.84 <span class="t">rows=600000</span> width=32)
+               Sort Method: external merge  Disk: 27136kB
+               -&gt;  Hash Join  (dp.pedido_id = p.id)
+ <span class="pt">Planning Time: 0.518 ms</span>
+ <span class="tt">Execution Time: 1551.634 ms</span></code></pre></div>
+<div class="sec"><div class="sechead"><span class="sechead-title">TP3 · Parte 4 · Spec 1 — agregacion: LEFT JOIN (AI) vs subconsulta escalar (alternativa) + EXCEPT</span><div class="sechsub">Equivalencia verificada: (A)EXCEPT(B)=0 y (B)EXCEPT(A)=0</div></div><pre><code><span class="c">-- ============================================================</span>
+<span class="c">-- FOOD STORE - TP3 - Parte 4: consultas bajo spec + equivalencia</span>
+<span class="c">-- ============================================================</span>
+<span class="c">-- Se redacta una spec precisa, la IA genera el SQL a partir de la</span>
+<span class="c">-- spec (sin solucion previa), y se escribe una SEGUNDA version de</span>
+<span class="c">-- distinta estructura que responda la misma pregunta. Luego se</span>
+<span class="c">-- verifica equivalencia con EXCEPT en ambas direcciones (debe dar</span>
+<span class="c">-- 0 filas). Sobre food_store_tp3.</span>
+<span class="c">-- ============================================================</span>
+
+<span class="c">-- ============================================================</span>
+<span class="c">-- SPEC 1 (agregacion / resumen)</span>
+<span class="c">-- «Genera una consulta SQL sobre el esquema Food Store que devuelva,</span>
+<span class="c">--   para cada categoria VIGENTE (categoria.activo = FALSE son las</span>
+<span class="c">--   dadas de baja y NO deben aparecer), el nombre de la categoria y</span>
+<span class="c">--   la cantidad de productos VIGENTES (producto.activo = TRUE) que</span>
+<span class="c">--   tiene, incluyendo las categorias sin productos vigentes con</span>
+<span class="c">--   cantidad 0. Ordena de mayor a menor cantidad (y por nombre como</span>
+<span class="c">--   desempate asc). No uses SELECT *. Usa LEFT JOIN.»</span>
+<span class="c">-- ============================================================</span>
+
+<span class="c">-- VERSION A (generada por la IA a partir de la spec)</span>
+<span class="k">SELECT</span> c.nombre, <span class="k">count</span>(p.id) <span class="k">AS</span> cantidad_productos
+<span class="k">FROM</span> categoria c
+<span class="k">LEFT</span> <span class="k">JOIN</span> producto p <span class="k">ON</span> p.categoria_id = c.id <span class="k">AND</span> p.activo = <span class="k">TRUE</span>
+<span class="k">WHERE</span> c.activo = <span class="k">TRUE</span>
+<span class="k">GROUP</span> <span class="k">BY</span> c.id, c.nombre
+<span class="k">ORDER</span> <span class="k">BY</span> cantidad_productos <span class="k">DESC</span>, c.nombre <span class="k">ASC</span>;
+
+<span class="c">-- VERSION B (alternativa de distinta estructura: subconsulta en vez</span>
+<span class="c">-- de LEFT JOIN con condicion en el ON)</span>
+<span class="k">SELECT</span> c.nombre,
+       (<span class="k">SELECT</span> <span class="k">count</span>(*) <span class="k">FROM</span> producto p
+        <span class="k">WHERE</span> p.categoria_id = c.id <span class="k">AND</span> p.activo = <span class="k">TRUE</span>) <span class="k">AS</span> cantidad_productos
+<span class="k">FROM</span> categoria c
+<span class="k">WHERE</span> c.activo = <span class="k">TRUE</span>
+<span class="k">ORDER</span> <span class="k">BY</span> cantidad_productos <span class="k">DESC</span>, c.nombre <span class="k">ASC</span>;
+
+<span class="c">-- VERIFICACION DE EQUIVALENCIA SPEC 1 (ambas deben dar 0 filas)</span>
+(
+  <span class="k">SELECT</span> c.nombre, <span class="k">count</span>(p.id) <span class="k">AS</span> cantidad_productos
+  <span class="k">FROM</span> categoria c
+  <span class="k">LEFT</span> <span class="k">JOIN</span> producto p <span class="k">ON</span> p.categoria_id = c.id <span class="k">AND</span> p.activo = <span class="k">TRUE</span>
+  <span class="k">WHERE</span> c.activo = <span class="k">TRUE</span>
+  <span class="k">GROUP</span> <span class="k">BY</span> c.id, c.nombre
+) <span class="k">EXCEPT</span> (
+  <span class="k">SELECT</span> c.nombre,
+         (<span class="k">SELECT</span> <span class="k">count</span>(*) <span class="k">FROM</span> producto p
+          <span class="k">WHERE</span> p.categoria_id = c.id <span class="k">AND</span> p.activo = <span class="k">TRUE</span>) <span class="k">AS</span> cantidad_productos
+  <span class="k">FROM</span> categoria c
+  <span class="k">WHERE</span> c.activo = <span class="k">TRUE</span>
+);
+
+(
+  <span class="k">SELECT</span> c.nombre,
+         (<span class="k">SELECT</span> <span class="k">count</span>(*) <span class="k">FROM</span> producto p
+          <span class="k">WHERE</span> p.categoria_id = c.id <span class="k">AND</span> p.activo = <span class="k">TRUE</span>) <span class="k">AS</span> cantidad_productos
+  <span class="k">FROM</span> categoria c
+  <span class="k">WHERE</span> c.activo = <span class="k">TRUE</span>
+) <span class="k">EXCEPT</span> (
+  <span class="k">SELECT</span> c.nombre, <span class="k">count</span>(p.id) <span class="k">AS</span> cantidad_productos
+  <span class="k">FROM</span> categoria c
+  <span class="k">LEFT</span> <span class="k">JOIN</span> producto p <span class="k">ON</span> p.categoria_id = c.id <span class="k">AND</span> p.activo = <span class="k">TRUE</span>
+  <span class="k">WHERE</span> c.activo = <span class="k">TRUE</span>
+  <span class="k">GROUP</span> <span class="k">BY</span> c.id, c.nombre
+);
+
+<span class="c">-- ============================================================</span>
+</code></pre></div>
+<div class="sec"><div class="sechead"><span class="sechead-title">TP3 · Parte 4 · Spec 2 — subconsulta: HAVING-subconsulta (AI) vs CTE+join (alternativa) + EXCEPT</span><div class="sechsub">Equivalencia verificada: ambos EXCEPT = 0 filas</div></div><pre><code><span class="c">-- SPEC 2 (subconsulta)</span>
+<span class="c">-- «Genera una consulta SQL sobre el esquema Food Store que liste los</span>
+<span class="c">--   productos VIGENTES (producto.activo = TRUE) cuyo total vendido</span>
+<span class="c">--   (suma de subtotal en detalle_pedido) sea MAYOR que el promedio</span>
+<span class="c">--   del total vendido de TODOS los productos vigentes. Devuelve el</span>
+<span class="c">--   nombre del producto y su total vendido con dos decimales,</span>
+<span class="c">--   ordenado de mayor a menor total. No uses SELECT *.»</span>
+<span class="c">-- ============================================================</span>
+
+<span class="c">-- VERSION A (generada por la IA a partir de la spec)</span>
+<span class="k">SELECT</span> pr.nombre, <span class="k">round</span>(<span class="k">sum</span>(dp.subtotal), <span class="n">2</span>) <span class="k">AS</span> total_vendido
+<span class="k">FROM</span> producto pr
+<span class="k">JOIN</span> detalle_pedido dp <span class="k">ON</span> dp.producto_id = pr.id
+<span class="k">WHERE</span> pr.activo = <span class="k">TRUE</span>
+<span class="k">GROUP</span> <span class="k">BY</span> pr.id, pr.nombre
+<span class="k">HAVING</span> <span class="k">sum</span>(dp.subtotal) &gt; (
+    <span class="k">SELECT</span> <span class="k">avg</span>(vendido)
+    <span class="k">FROM</span> (
+        <span class="k">SELECT</span> <span class="k">sum</span>(dp2.subtotal) <span class="k">AS</span> vendido
+        <span class="k">FROM</span> producto pr2
+        <span class="k">JOIN</span> detalle_pedido dp2 <span class="k">ON</span> dp2.producto_id = pr2.id
+        <span class="k">WHERE</span> pr2.activo = <span class="k">TRUE</span>
+        <span class="k">GROUP</span> <span class="k">BY</span> pr2.id
+    ) t
+)
+<span class="k">ORDER</span> <span class="k">BY</span> total_vendido <span class="k">DESC</span>;
+
+<span class="c">-- VERSION B (alternativa de distinta estructura: CTE + join en vez</span>
+<span class="c">-- de subconsulta en el HAVING)</span>
+<span class="k">WITH</span> ventas <span class="k">AS</span> (
+    <span class="k">SELECT</span> dp.producto_id, <span class="k">sum</span>(dp.subtotal) <span class="k">AS</span> total_vendido
+    <span class="k">FROM</span> detalle_pedido dp
+    <span class="k">GROUP</span> <span class="k">BY</span> dp.producto_id
+),
+promedios <span class="k">AS</span> (
+    <span class="k">SELECT</span> <span class="k">avg</span>(total_vendido) <span class="k">AS</span> promedio
+    <span class="k">FROM</span> ventas v
+    <span class="k">JOIN</span> producto pr <span class="k">ON</span> pr.id = v.producto_id
+    <span class="k">WHERE</span> pr.activo = <span class="k">TRUE</span>
+)
+<span class="k">SELECT</span> pr.nombre, <span class="k">round</span>(v.total_vendido, <span class="n">2</span>) <span class="k">AS</span> total_vendido
+<span class="k">FROM</span> ventas v
+<span class="k">JOIN</span> producto pr <span class="k">ON</span> pr.id = v.producto_id
+<span class="k">CROSS</span> <span class="k">JOIN</span> promedios
+<span class="k">WHERE</span> pr.activo = <span class="k">TRUE</span>
+  <span class="k">AND</span> v.total_vendido &gt; promedios.promedio
+<span class="k">ORDER</span> <span class="k">BY</span> v.total_vendido <span class="k">DESC</span>;
+
+<span class="c">-- VERIFICACION DE EQUIVALENCIA SPEC 2 (ambas deben dar 0 filas)</span>
+(
+  <span class="k">SELECT</span> pr.nombre, <span class="k">round</span>(<span class="k">sum</span>(dp.subtotal), <span class="n">2</span>) <span class="k">AS</span> total_vendido
+  <span class="k">FROM</span> producto pr
+  <span class="k">JOIN</span> detalle_pedido dp <span class="k">ON</span> dp.producto_id = pr.id
+  <span class="k">WHERE</span> pr.activo = <span class="k">TRUE</span>
+  <span class="k">GROUP</span> <span class="k">BY</span> pr.id, pr.nombre
+  <span class="k">HAVING</span> <span class="k">sum</span>(dp.subtotal) &gt; (
+      <span class="k">SELECT</span> <span class="k">avg</span>(vendido)
+      <span class="k">FROM</span> (
+          <span class="k">SELECT</span> <span class="k">sum</span>(dp2.subtotal) <span class="k">AS</span> vendido
+          <span class="k">FROM</span> producto pr2
+          <span class="k">JOIN</span> detalle_pedido dp2 <span class="k">ON</span> dp2.producto_id = pr2.id
+          <span class="k">WHERE</span> pr2.activo = <span class="k">TRUE</span>
+          <span class="k">GROUP</span> <span class="k">BY</span> pr2.id
+      ) t
+  )
+) <span class="k">EXCEPT</span> (
+  <span class="k">WITH</span> ventas <span class="k">AS</span> (
+      <span class="k">SELECT</span> dp.producto_id, <span class="k">sum</span>(dp.subtotal) <span class="k">AS</span> total_vendido
+      <span class="k">FROM</span> detalle_pedido dp
+      <span class="k">GROUP</span> <span class="k">BY</span> dp.producto_id
+  ),
+  promedios <span class="k">AS</span> (
+      <span class="k">SELECT</span> <span class="k">avg</span>(total_vendido) <span class="k">AS</span> promedio
+      <span class="k">FROM</span> ventas v
+      <span class="k">JOIN</span> producto pr <span class="k">ON</span> pr.id = v.producto_id
+      <span class="k">WHERE</span> pr.activo = <span class="k">TRUE</span>
+  )
+  <span class="k">SELECT</span> pr.nombre, <span class="k">round</span>(v.total_vendido, <span class="n">2</span>) <span class="k">AS</span> total_vendido
+  <span class="k">FROM</span> ventas v
+  <span class="k">JOIN</span> producto pr <span class="k">ON</span> pr.id = v.producto_id
+  <span class="k">CROSS</span> <span class="k">JOIN</span> promedios
+  <span class="k">WHERE</span> pr.activo = <span class="k">TRUE</span>
+    <span class="k">AND</span> v.total_vendido &gt; promedios.promedio
+);
+
+(
+  <span class="k">WITH</span> ventas <span class="k">AS</span> (
+      <span class="k">SELECT</span> dp.producto_id, <span class="k">sum</span>(dp.subtotal) <span class="k">AS</span> total_vendido
+      <span class="k">FROM</span> detalle_pedido dp
+      <span class="k">GROUP</span> <span class="k">BY</span> dp.producto_id
+  ),
+  promedios <span class="k">AS</span> (
+      <span class="k">SELECT</span> <span class="k">avg</span>(total_vendido) <span class="k">AS</span> promedio
+      <span class="k">FROM</span> ventas v
+      <span class="k">JOIN</span> producto pr <span class="k">ON</span> pr.id = v.producto_id
+      <span class="k">WHERE</span> pr.activo = <span class="k">TRUE</span>
+  )
+  <span class="k">SELECT</span> pr.nombre, <span class="k">round</span>(v.total_vendido, <span class="n">2</span>) <span class="k">AS</span> total_vendido
+  <span class="k">FROM</span> ventas v
+  <span class="k">JOIN</span> producto pr <span class="k">ON</span> pr.id = v.producto_id
+  <span class="k">CROSS</span> <span class="k">JOIN</span> promedios
+  <span class="k">WHERE</span> pr.activo = <span class="k">TRUE</span>
+    <span class="k">AND</span> v.total_vendido &gt; promedios.promedio
+) <span class="k">EXCEPT</span> (
+  <span class="k">SELECT</span> pr.nombre, <span class="k">round</span>(<span class="k">sum</span>(dp.subtotal), <span class="n">2</span>) <span class="k">AS</span> total_vendido
+  <span class="k">FROM</span> producto pr
+  <span class="k">JOIN</span> detalle_pedido dp <span class="k">ON</span> dp.producto_id = pr.id
+  <span class="k">WHERE</span> pr.activo = <span class="k">TRUE</span>
+  <span class="k">GROUP</span> <span class="k">BY</span> pr.id, pr.nombre
+  <span class="k">HAVING</span> <span class="k">sum</span>(dp.subtotal) &gt; (
+      <span class="k">SELECT</span> <span class="k">avg</span>(vendido)
+      <span class="k">FROM</span> (
+          <span class="k">SELECT</span> <span class="k">sum</span>(dp2.subtotal) <span class="k">AS</span> vendido
+          <span class="k">FROM</span> producto pr2
+          <span class="k">JOIN</span> detalle_pedido dp2 <span class="k">ON</span> dp2.producto_id = pr2.id
+          <span class="k">WHERE</span> pr2.activo = <span class="k">TRUE</span>
+          <span class="k">GROUP</span> <span class="k">BY</span> pr2.id
+      ) t
+  )
+);
+</code></pre></div>
+<div class="sec"><div class="sechead"><span class="sechead-title">TP3 · Parte 5 · Competencia: indice compuesto (categoria_id, precio) — 39,9 ms → 5,7 ms (7,0×)</span><div class="sechsub">Con ambos filtros convertidos en Index Cond desaparece el descarte de 6.904 filas · mejora 7,0×</div></div><pre><code><span class="k">SELECT</span> c.nombre <span class="k">AS</span> categoria, p.nombre, p.precio, p.stock
+<span class="k">FROM</span> producto p
+<span class="k">JOIN</span> categoria c <span class="k">ON</span> c.id = p.categoria_id
+<span class="k">WHERE</span> c.nombre = <span class="s">'Pizzas'</span>
+  <span class="k">AND</span> p.precio <span class="k">BETWEEN</span> <span class="n">1000</span> <span class="k">AND</span> <span class="n">3000</span>
+<span class="k">ORDER</span> <span class="k">BY</span> p.precio <span class="k">DESC</span>;
+
+<span class="c">-- Solucion aplicada</span>
+<span class="k">CREATE</span> <span class="k">INDEX</span> idx_producto_cat_precio <span class="k">ON</span> producto (categoria_id, precio);PLAN ANTES: Bitmap Index Scan on idx_producto_categoria_activo (categoria_id=c.id)
+             Filter: (precio &gt;= 1000 AND precio &lt;= 3000)
+             <span class="rr">Rows Removed by Filter: 6904</span>
+<span class="tt">Execution Time: 39.897 ms</span>
+
+PLAN DESPUES: Bitmap Index Scan on idx_producto_cat_precio
+             Index Cond: categoria_id=c.id AND precio&gt;=1000 AND precio&lt;=3000
+<span class="tt">Execution Time: 5.737 ms</span></code></pre></div></body></html>

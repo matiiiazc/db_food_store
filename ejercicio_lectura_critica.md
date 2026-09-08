@@ -66,13 +66,13 @@ WHERE NOT EXISTS (
 );
 ```
 
-O usando `LEFT JOIN`:
+O usando `NOT IN` con filtro de `NULL` (equivalente cuando la subconsulta se excluye de NULLs):
 
 ```sql
 DELETE FROM categoria c
-USING producto p
-WHERE c.id = p.categoria_id
-  AND p.id IS NULL;
+WHERE c.id NOT IN (
+    SELECT categoria_id FROM producto WHERE categoria_id IS NOT NULL
+);
 ```
 
-La opción con `NOT EXISTS` es la preferida porque es clara, eficiente y no tiene problemas con valores `NULL`.
+> **Nota:** se eliminó una versión anterior con `DELETE ... USING producto p WHERE c.id = p.categoria_id AND p.id IS NULL`. Era **contradictoria**: el `USING` une solo las categorías que **tienen** productos (`c.id = p.categoria_id`), y la condición `p.id IS NULL` nunca podía cumplirse porque `p.id` es la clave primaria (nunca NULL). Por eso ese DELETE nunca borraba nada; es el tipo de error silencioso que se corrige al leer línea por línea. La opción preferida es `NOT EXISTS`, porque es clara, eficiente y no tiene problemas con valores `NULL`.

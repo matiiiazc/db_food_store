@@ -1,0 +1,651 @@
+<!DOCTYPE html><html lang="es"><head><meta charset="utf-8"><title>TP2 — Concurrencia e IA: evidencia de codigo y salidas reales</title><style>
+body { background:#0d1117; color:#c9d1d9; font-family:'Segoe UI',Roboto,sans-serif; margin:0; padding:26px; }
+h1 { font-size:21px; color:#ffffff; margin:0 0 3px 0; }
+.docsub { color:#8b949e; margin-bottom:20px; font-size:13px; }
+.sec { background:#161b22; border:1px solid #30363d; border-radius:8px; margin:0 0 22px 0; overflow:hidden;
+       page-break-inside:avoid; }
+.sechead { background:#1f2630; padding:9px 14px; border-bottom:1px solid #30363d; }
+.sechead-title { font-weight:700; color:#ffffff; font-size:14px; letter-spacing:.02em; }
+.sechsub { color:#8b949e; font-size:12px; margin-top:2px; }
+pre { margin:0; padding:14px 16px; overflow-x:auto; }
+code { font-family:Consolas,'Cascadia Code',monospace; font-size:12.5px; line-height:1.55; }
+.k  { color:#79c0ff; }
+.s  { color:#a5d6ff; }
+.c  { color:#8b949e; font-style:italic; }
+.n  { color:#f0a63a; }
+.t  { color:#56d364; }
+.tt { color:#ff7b72; font-weight:600; }
+.pt { color:#d2a8ff; }
+.rr { color:#ff7b72; }
+.hh { color:#56d364; }
+</style></head><body><h1>TP2 — Concurrencia e IA: evidencia de codigo y salidas reales</h1><div class="docsub">Captura por seccion con Win+Shift+S · Codigo de restricciones.sql y test_restricciones.sql + salidas reales del motor</div><div class="sec"><div class="sechead"><span class="sechead-title">TP2 · Parte 1 · restricciones.sql — Regla 1: baja lógica (no DELETE físico)</span><div class="sechsub">Function + triggers trg_categoria_no_delete y trg_producto_no_delete (líneas 15-31)</div></div><pre><code><span class="c">-- ============================================================</span>
+<span class="c">-- FOOD STORE - restricciones.sql</span>
+<span class="c">-- TP2 - Parte 1: Integridad versionada</span>
+<span class="c">-- ============================================================</span>
+<span class="c">-- Reglas de negocio que hoy dependen de la aplicacion y no</span>
+<span class="c">-- estan garantizadas por el motor. Se agregan como triggers.</span>
+<span class="c">-- ============================================================</span>
+
+<span class="c">-- ============================================================</span>
+<span class="c">-- REGLA 1: Baja logica - impedir DELETE directo</span>
+<span class="c">-- Solo se permite desactivar con UPDATE ... SET activo = FALSE,</span>
+<span class="c">-- nunca borrar fisicamente un registro de categoria o producto.</span>
+<span class="c">-- ============================================================</span>
+
+<span class="k">CREATE</span> <span class="k">OR</span> REPLACE <span class="k">FUNCTION</span> fn_impedir_delete_logico()
+<span class="k">RETURNS</span> <span class="k">TRIGGER</span> <span class="k">AS</span> $$
+<span class="k">BEGIN</span>
+    <span class="k">RAISE</span> <span class="k">EXCEPTION</span> <span class="s">'No esta permitido eliminar registros fisicamente. Use UPDATE ... SET activo = FALSE.'</span>;
+    RETURN <span class="k">NULL</span>;
+<span class="k">END</span>;
+$$ <span class="k">LANGUAGE</span> plpgsql;
+
+<span class="k">CREATE</span> <span class="k">TRIGGER</span> trg_categoria_no_delete
+    BEFORE <span class="k">DELETE</span> <span class="k">ON</span> categoria
+    FOR EACH ROW
+    EXECUTE <span class="k">FUNCTION</span> fn_impedir_delete_logico();
+
+<span class="k">CREATE</span> <span class="k">TRIGGER</span> trg_producto_no_delete
+    BEFORE <span class="k">DELETE</span> <span class="k">ON</span> producto
+    FOR EACH ROW
+    EXECUTE <span class="k">FUNCTION</span> fn_impedir_delete_logico();
+
+</code></pre></div>
+<div class="sec"><div class="sechead"><span class="sechead-title">TP2 · Parte 1 · restricciones.sql — Regla 2: stock no negativo al cargar detalle</span><div class="sechsub">Function fn_descontar_stock + trigger trg_detalle_descontar_stock (líneas 38-59)</div></div><pre><code><span class="c">-- ============================================================</span>
+<span class="c">-- REGLA 2: Stock al crear detalle - decrementar stock y</span>
+<span class="c">-- verificar que no quede negativo</span>
+<span class="c">-- ============================================================</span>
+
+<span class="k">CREATE</span> <span class="k">OR</span> REPLACE <span class="k">FUNCTION</span> fn_descontar_stock()
+<span class="k">RETURNS</span> <span class="k">TRIGGER</span> <span class="k">AS</span> $$
+<span class="k">BEGIN</span>
+    <span class="k">IF</span> (<span class="k">SELECT</span> stock <span class="k">FROM</span> producto <span class="k">WHERE</span> id = NEW.producto_id) &lt; NEW.cantidad <span class="k">THEN</span>
+        <span class="k">RAISE</span> <span class="k">EXCEPTION</span> <span class="s">'Stock insuficiente para el producto id=%. Stock actual: %, cantidad pedida: %'</span>,
+            NEW.producto_id,
+            (<span class="k">SELECT</span> stock <span class="k">FROM</span> producto <span class="k">WHERE</span> id = NEW.producto_id),
+            NEW.cantidad;
+    <span class="k">END</span> <span class="k">IF</span>;
+
+    <span class="k">UPDATE</span> producto
+    <span class="k">SET</span> stock = stock - NEW.cantidad
+    <span class="k">WHERE</span> id = NEW.producto_id;
+
+    RETURN NEW;
+<span class="k">END</span>;
+$$ <span class="k">LANGUAGE</span> plpgsql;
+
+<span class="k">CREATE</span> <span class="k">TRIGGER</span> trg_detalle_descontar_stock
+    BEFORE <span class="k">INSERT</span> <span class="k">ON</span> detalle_pedido
+    FOR EACH ROW
+    EXECUTE <span class="k">FUNCTION</span> fn_descontar_stock();
+
+</code></pre></div>
+<div class="sec"><div class="sechead"><span class="sechead-title">TP2 · Parte 1 · restricciones.sql — Regla 3: subtotal = cantidad × precio_unitario</span><div class="sechsub">Function fn_verificar_subtotal + trigger trg_detalle_verificar_subtotal (líneas 65-83)</div></div><pre><code><span class="c">-- ============================================================</span>
+<span class="c">-- REGLA 3: Subtotal consistente - cantidad x precio_unitario</span>
+<span class="c">-- ============================================================</span>
+
+<span class="k">CREATE</span> <span class="k">OR</span> REPLACE <span class="k">FUNCTION</span> fn_verificar_subtotal()
+<span class="k">RETURNS</span> <span class="k">TRIGGER</span> <span class="k">AS</span> $$
+<span class="k">BEGIN</span>
+    <span class="k">IF</span> NEW.subtotal != (NEW.cantidad * NEW.precio_unitario) <span class="k">THEN</span>
+        <span class="k">RAISE</span> <span class="k">EXCEPTION</span> <span class="s">'El subtotal (%) no coincide con cantidad (%) x precio_unitario (%). Resultado esperado: %'</span>,
+            NEW.subtotal,
+            NEW.cantidad,
+            NEW.precio_unitario,
+            (NEW.cantidad * NEW.precio_unitario);
+    <span class="k">END</span> <span class="k">IF</span>;
+
+    RETURN NEW;
+<span class="k">END</span>;
+$$ <span class="k">LANGUAGE</span> plpgsql;
+
+<span class="k">CREATE</span> <span class="k">TRIGGER</span> trg_detalle_verificar_subtotal
+    BEFORE <span class="k">INSERT</span> <span class="k">OR</span> <span class="k">UPDATE</span> <span class="k">ON</span> detalle_pedido
+    FOR EACH ROW
+    EXECUTE <span class="k">FUNCTION</span> fn_verificar_subtotal();</code></pre></div>
+<div class="sec"><div class="sechead"><span class="sechead-title">TP2 · Parte 1 · test_restricciones.sql — tests dentro de BEGIN...ROLLBACK con SAVEPOINT (protocolo transacción)</span><div class="sechsub">Tests validos e invalidos de las 3 reglas, todo revertido</div></div><pre><code><span class="c">-- ============================================================</span>
+<span class="c">-- FOOD STORE - test_restricciones.sql</span>
+<span class="c">-- Prueba las restricciones dentro de una transaccion</span>
+<span class="c">-- Usa SAVEPOINT para que un error no aborte el resto de los tests</span>
+<span class="c">-- ============================================================</span>
+<span class="c">-- Ejecutar desde la terminal:</span>
+<span class="c">--   psql -d copia_trabajo -f test_restricciones.sql</span>
+<span class="c">-- Resultado: los 3 primeros errores son ESPERADOS (reglas que</span>
+<span class="c">-- rechazan datos invalidos). Al final va ROLLBACK.</span>
+<span class="c">-- ============================================================</span>
+
+<span class="k">BEGIN</span>;
+
+<span class="c">-- ============================================================</span>
+<span class="c">-- SETUP: datos de prueba</span>
+<span class="c">-- ============================================================</span>
+
+<span class="k">INSERT</span> <span class="k">INTO</span> categoria (nombre) <span class="k">VALUES</span> (<span class="s">'Pizzas'</span>);
+<span class="k">INSERT</span> <span class="k">INTO</span> categoria (nombre) <span class="k">VALUES</span> (<span class="s">'Bebidas'</span>);
+
+<span class="k">INSERT</span> <span class="k">INTO</span> producto (nombre, precio, stock, activo, categoria_id)
+<span class="k">VALUES</span> (<span class="s">'Muzzarella'</span>, <span class="n">800.00</span>, <span class="n">10</span>, <span class="k">TRUE</span>,
+        (<span class="k">SELECT</span> id <span class="k">FROM</span> categoria <span class="k">WHERE</span> nombre = <span class="s">'Pizzas'</span>));
+
+<span class="k">INSERT</span> <span class="k">INTO</span> producto (nombre, precio, stock, activo, categoria_id)
+<span class="k">VALUES</span> (<span class="s">'Coca-Cola'</span>, <span class="n">500.00</span>, <span class="n">20</span>, <span class="k">TRUE</span>,
+        (<span class="k">SELECT</span> id <span class="k">FROM</span> categoria <span class="k">WHERE</span> nombre = <span class="s">'Bebidas'</span>));
+
+<span class="k">INSERT</span> <span class="k">INTO</span> cliente (nombre, apellido, email)
+<span class="k">VALUES</span> (<span class="s">'Juan'</span>, <span class="s">'Perez'</span>, <span class="s">'juan@test.com'</span>);
+
+<span class="k">INSERT</span> <span class="k">INTO</span> pedido (forma_pago, cliente_id)
+<span class="k">VALUES</span> (<span class="s">'EFECTIVO'</span>,
+        (<span class="k">SELECT</span> id <span class="k">FROM</span> cliente <span class="k">WHERE</span> email = <span class="s">'juan@test.com'</span>));
+
+<span class="c">-- ============================================================</span>
+<span class="c">-- TEST 1: Baja logica - DELETE directo (debe FALLAR)</span>
+<span class="c">-- ============================================================</span>
+
+<span class="k">SAVEPOINT</span> test1;
+<span class="k">DELETE</span> <span class="k">FROM</span> categoria <span class="k">WHERE</span> nombre = <span class="s">'Pizzas'</span>;
+<span class="c">-- ERROR esperado: "No esta permitido eliminar registros fisicamente..."</span>
+<span class="k">ROLLBACK</span> <span class="k">TO</span> test1;
+
+<span class="c">-- ============================================================</span>
+<span class="c">-- TEST 2: Baja logica - UPDATE logico (debe funcionar)</span>
+<span class="c">-- ============================================================</span>
+
+<span class="k">UPDATE</span> categoria <span class="k">SET</span> activo = <span class="k">FALSE</span> <span class="k">WHERE</span> nombre = <span class="s">'Bebidas'</span>;
+<span class="c">-- OK, 1 fila afectada</span>
+
+<span class="c">-- ============================================================</span>
+<span class="c">-- TEST 3: Stock - INSERT valido (debe funcionar y bajar stock)</span>
+<span class="c">-- ============================================================</span>
+
+<span class="k">INSERT</span> <span class="k">INTO</span> detalle_pedido (pedido_id, producto_id, cantidad, precio_unitario, subtotal)
+<span class="k">VALUES</span> (
+    (<span class="k">SELECT</span> id <span class="k">FROM</span> pedido <span class="k">ORDER</span> <span class="k">BY</span> id <span class="k">DESC</span> <span class="k">LIMIT</span> <span class="n">1</span>),
+    (<span class="k">SELECT</span> id <span class="k">FROM</span> producto <span class="k">WHERE</span> nombre = <span class="s">'Muzzarella'</span>),
+    <span class="n">3</span>, <span class="n">800.00</span>, <span class="n">2400.00</span>
+);
+<span class="c">-- OK</span>
+
+<span class="k">SELECT</span> nombre, stock <span class="k">FROM</span> producto <span class="k">WHERE</span> nombre = <span class="s">'Muzzarella'</span>;
+<span class="c">-- Stock esperado: 7</span>
+
+<span class="c">-- ============================================================</span>
+<span class="c">-- TEST 4: Stock - INSERT con stock insuficiente (debe FALLAR)</span>
+<span class="c">-- ============================================================</span>
+
+<span class="k">SAVEPOINT</span> test4;
+<span class="k">INSERT</span> <span class="k">INTO</span> detalle_pedido (pedido_id, producto_id, cantidad, precio_unitario, subtotal)
+<span class="k">VALUES</span> (
+    (<span class="k">SELECT</span> id <span class="k">FROM</span> pedido <span class="k">ORDER</span> <span class="k">BY</span> id <span class="k">DESC</span> <span class="k">LIMIT</span> <span class="n">1</span>),
+    (<span class="k">SELECT</span> id <span class="k">FROM</span> producto <span class="k">WHERE</span> nombre = <span class="s">'Coca-Cola'</span>),
+    <span class="n">100</span>, <span class="n">500.00</span>, <span class="n">50000.00</span>
+);
+<span class="c">-- ERROR esperado: "Stock insuficiente..."</span>
+<span class="k">ROLLBACK</span> <span class="k">TO</span> test4;
+
+<span class="c">-- ============================================================</span>
+<span class="c">-- TEST 5: Subtotal - subtotal incorrecto (debe FALLAR)</span>
+<span class="c">-- ============================================================</span>
+
+<span class="k">SAVEPOINT</span> test5;
+<span class="k">INSERT</span> <span class="k">INTO</span> detalle_pedido (pedido_id, producto_id, cantidad, precio_unitario, subtotal)
+<span class="k">VALUES</span> (
+    (<span class="k">SELECT</span> id <span class="k">FROM</span> pedido <span class="k">ORDER</span> <span class="k">BY</span> id <span class="k">DESC</span> <span class="k">LIMIT</span> <span class="n">1</span>),
+    (<span class="k">SELECT</span> id <span class="k">FROM</span> producto <span class="k">WHERE</span> nombre = <span class="s">'Coca-Cola'</span>),
+    <span class="n">2</span>, <span class="n">500.00</span>, <span class="n">9999.00</span>
+);
+<span class="c">-- ERROR esperado: "El subtotal no coincide..."</span>
+<span class="k">ROLLBACK</span> <span class="k">TO</span> test5;
+
+<span class="c">-- ============================================================</span>
+<span class="c">-- TEST 6: Subtotal - subtotal correcto (debe funcionar)</span>
+<span class="c">-- ============================================================</span>
+
+<span class="k">INSERT</span> <span class="k">INTO</span> detalle_pedido (pedido_id, producto_id, cantidad, precio_unitario, subtotal)
+<span class="k">VALUES</span> (
+    (<span class="k">SELECT</span> id <span class="k">FROM</span> pedido <span class="k">ORDER</span> <span class="k">BY</span> id <span class="k">DESC</span> <span class="k">LIMIT</span> <span class="n">1</span>),
+    (<span class="k">SELECT</span> id <span class="k">FROM</span> producto <span class="k">WHERE</span> nombre = <span class="s">'Coca-Cola'</span>),
+    <span class="n">2</span>, <span class="n">500.00</span>, <span class="n">1000.00</span>
+);
+<span class="c">-- OK</span>
+
+<span class="c">-- ============================================================</span>
+<span class="c">-- RESUMEN</span>
+<span class="c">-- ============================================================</span>
+
+<span class="k">SELECT</span> nombre, activo <span class="k">FROM</span> categoria;
+<span class="k">SELECT</span> nombre, stock, activo <span class="k">FROM</span> producto;
+
+<span class="k">ROLLBACK</span>;</code></pre></div>
+<div class="sec"><div class="sechead"><span class="sechead-title">TP2 · Parte 2 · informe_concurrencia.md — Escenario 1 (lectura no repetible)</span><div class="sechsub">Salidas reales: READ COMMITTED 10→50, REPEATABLE READ 10→10</div></div><pre><code># Informe de Concurrencia — Food Store
+
+## Escenario 1: Lectura no repetible
+
+### Cómo se reprodujo
+
+**Sesión A:**
+```sql
+BEGIN;
+SET TRANSACTION ISOLATION LEVEL READ COMMITTED;
+SELECT stock FROM producto WHERE nombre = 'Producto Test';
+```
+
+**Sesión B:**
+```sql
+BEGIN;
+UPDATE producto SET stock = 50 WHERE nombre = 'Producto Test';
+COMMIT;
+```
+
+**Sesión A (continúa, unos segundos después):**
+```sql
+SELECT stock FROM producto WHERE nombre = 'Producto Test';
+ROLLBACK;
+```
+
+### Qué se observó
+
+Salida real (READ COMMITTED):
+
+| Momento | Sesión A (SELECT) | Sesión B (UPDATE) |
+|---|---|---|
+| Primera lectura | stock = 10 | — |
+| — | — | UPDATE stock = 50; COMMIT |
+| Segunda lectura | stock = 50 | — |
+
+El mismo SELECT dentro de la misma transacción devolvió valores distintos: 10 y luego 50.
+
+### Explicación de la IA
+
+Herramienta: **OpenCode**
+
+&gt; "Con READ COMMITTED, cada lectura ve el último COMMIT en el momento de ejecutarse. Si otra sesión hace COMMIT entre las dos lecturas, el resultado cambia. Esto se llama lectura no repetible. Para evitarlo, se usa REPEATABLE READ, que toma un snapshot al inicio de la transacción y lo mantiene durante toda ella."
+
+### Verificación en el motor
+
+Salida real (REPEATABLE READ):
+
+```sql
+-- Sesión A con REPEATABLE READ
+BEGIN;
+SET TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+SELECT stock FROM producto WHERE nombre = 'Producto Test';
+-- lectura 1 = 10
+
+-- Sesión B
+BEGIN;
+UPDATE producto SET stock = 50 WHERE nombre = 'Producto Test';
+COMMIT;
+
+-- Sesión A (continúa)
+SELECT stock FROM producto WHERE nombre = 'Producto Test';
+-- lectura 2 = 10 (no cambió)
+
+ROLLBACK;
+```
+
+### Conclusión
+
+La explicación de la IA se confirmó. Con REPEATABLE READ la segunda lectura devolvió el mismo valor (10) pese a que la sesión B había commiteado el cambio a 50.
+
+---
+
+## Escenario 2: Lectura fantasma
+
+### Cómo se reprodujo
+
+**Sesión A:**
+```sql
+BEGIN;
+SET TRANSACTION ISOLATION LEVEL READ COMMITTED;
+SELECT COUNT(*) FROM producto WHERE activo = TRUE;
+```
+
+**Sesión B:**
+```sql
+BEGIN;
+INSERT INTO categoria (nombre) VALUES ('Nueva');
+INSERT INTO producto (nombre, precio, stock, activo, categoria_id)
+VALUES ('Test Fantasma', 100.00, 5, TRUE, (SELECT id FROM categoria WHERE nombre = 'Nueva'));
+COMMIT;
+```
+
+**Sesión A (continúa):**
+```sql
+SELECT COUNT(*) FROM producto WHERE activo = TRUE;
+COMMIT;
+```
+
+### Qué se observó
+
+Salida real (READ COMMITTED):
+
+| Momento | Sesión A (COUNT) | Sesión B (INSERT) |
+|---|---|---|
+| Primera lectura | COUNT = 1 | — |
+| — | — | INSERT producto; COMMIT |
+| Segunda lectura | COUNT = 2 | — |
+
+Apareció una fila nueva (fantasma) que cumplía la condición del WHERE.
+
+### Explicación de la IA
+
+Herramienta: **OpenCode**
+
+&gt; "Con READ COMMITTED, cada COUNT ve las filas commiteadas al momento de ejecutarse. Si otra sesión inserta y commitea una fila nueva entre los dos COUNT, el segundo la incluye. Esto se llama lectura fantasma. Para evitarlo, se usa SERIALIZABLE, que bloquea las filas que cumplieron el WHERE durante toda la transacción."
+
+### Verificación en el motor
+
+Salida real (SERIALIZABLE):
+
+```sql
+-- Sesión A con SERIALIZABLE
+BEGIN;
+SET TRANSACTION ISOLATION LEVEL SERIALIZABLE;
+SELECT COUNT(*) FROM producto WHERE activo = TRUE;
+-- primer COUNT = 2
+
+-- Sesión B
+BEGIN;
+INSERT INTO categoria (nombre) VALUES ('FantasmaNueva2');
+INSERT INTO producto (nombre, precio, stock, activo, categoria_id)
+VALUES ('FantasmaY', 100.00, 5, TRUE, (SELECT id FROM categoria WHERE nombre = 'FantasmaNueva2'));
+COMMIT;
+
+-- Sesión A (continúa)
+SELECT COUNT(*) FROM producto WHERE activo = TRUE;
+-- segundo COUNT = 2 (no cambió, el fantasma no aparece)
+
+ROLLBACK;
+```
+
+### Conclusión
+
+La explicación de la IA se confirmó. Con SERIALIZABLE el fantasma no aparece: el segundo COUNT devolvió el mismo valor (2) pese a que la sesión B insertó y commiteó una fila nueva.
+
+---
+
+## Escenario 3: Espera por bloqueo
+
+### Cómo se reprodujo
+
+**Sesión A:**
+```sql
+BEGIN;
+SELECT nombre FROM producto WHERE nombre = 'Producto Lock' FOR UPDATE;
+-- (no hace COMMIT todavía; retiene el lock 5 segundos)
+```
+
+**Sesión B:**
+```sql
+BEGIN;
+SELECT nombre FROM producto WHERE nombre = 'Producto Lock' FOR UPDATE;
+-- SE BLOQUEA: queda esperando a que la sesión A haga COMMIT o ROLLBACK
+```
+
+**Sesión A (tras 5 segundos):**
+```sql
+ROLLBACK;
+-- libera el lock, la sesión B se desbloquea
+```
+
+### Qué se observó
+
+Salida real:
+
+| Momento | Sesión A | Sesión B |
+|---|---|---|
+| T=0 | `SELECT ... FOR UPDATE` → OK, toma el lock | — |
+| T=2s | (retiene el lock) | `SELECT ... FOR UPDATE` → BLOQUEADA |
+| T=5s | `ROLLBACK` → libera el lock | Se desbloquea y devuelve la fila |
+
+Medición real: la sesión B tardó **~3.4 segundos** en completar el `FOR UPDATE`, es decir, quedó esperando hasta que la sesión A hizo ROLLBACK. La sesión B quedó bloqueada, no falló.
+
+### Explicación de la IA
+
+Herramienta: **OpenCode**
+
+&gt; "FOR UPDATE toma un lock exclusivo sobre las filas que matchean el WHERE. Si otra sesión intenta tomar FOR UPDATE sobre la misma fila, queda en espera (no falla, solo bloquea). El lock se libera con COMMIT o ROLLBACK. Esto es un mecanismo normal de concurrencia, no es un error."
+
+### Verificación en el motor
+
+Se ejecutó en el motor real y se confirmó que:
+1. La sesión B quedó bloqueada (~3.4 segundos de espera real medidos con Stopwatch).
+2. Al hacer ROLLBACK en A, B se desbloqueó y recibió la fila.
+
+Comandos que dieron las salidas reales:
+
+```sql
+-- SESION A (job en segundo plano)
+BEGIN;
+SELECT ... FROM producto WHERE nombre = 'Producto Lock' FOR UPDATE;
+SELECT pg_sleep(5);
+ROLLBACK;
+
+-- SESION B (ejecutada al mismo tiempo)
+SELECT ... FROM producto WHERE nombre = 'Producto Lock' FOR UPDATE;
+-- -&gt; tarda 3.4 s (bloqueada) y recién entonces devuelve la fila
+```
+
+3. El nivel de aislamiento no afecta este comportamiento: el lock exclusivo por `FOR UPDATE` ocurre igual en READ COMMITTED y REPEATABLE READ.
+
+### Conclusión
+
+La explicación de la IA se confirmó. El bloqueo por `FOR UPDATE` es el mecanismo esperado: la sesión B espera hasta que la sesión A libera el lock. No es un problema a resolver, es el comportamiento correcto del motor para garantizar exclusión mutua.
+</code></pre></div>
+<div class="sec"><div class="sechead"><span class="sechead-title">TP2 · Parte 2 · informe_concurrencia.md — Escenario 2 (lectura fantasma) y Escenario 3 (espera por lock)</span><div class="sechsub">Salidas reales: COUNT 1→2 (RC) y 2→2 (SERIALIZABLE); espera de bloqueo ~3.4 s</div></div><pre><code># Informe de Concurrencia — Food Store
+
+## Escenario 1: Lectura no repetible
+
+### Cómo se reprodujo
+
+**Sesión A:**
+```sql
+BEGIN;
+SET TRANSACTION ISOLATION LEVEL READ COMMITTED;
+SELECT stock FROM producto WHERE nombre = 'Producto Test';
+```
+
+**Sesión B:**
+```sql
+BEGIN;
+UPDATE producto SET stock = 50 WHERE nombre = 'Producto Test';
+COMMIT;
+```
+
+**Sesión A (continúa, unos segundos después):**
+```sql
+SELECT stock FROM producto WHERE nombre = 'Producto Test';
+ROLLBACK;
+```
+
+### Qué se observó
+
+Salida real (READ COMMITTED):
+
+| Momento | Sesión A (SELECT) | Sesión B (UPDATE) |
+|---|---|---|
+| Primera lectura | stock = 10 | — |
+| — | — | UPDATE stock = 50; COMMIT |
+| Segunda lectura | stock = 50 | — |
+
+El mismo SELECT dentro de la misma transacción devolvió valores distintos: 10 y luego 50.
+
+### Explicación de la IA
+
+Herramienta: **OpenCode**
+
+&gt; "Con READ COMMITTED, cada lectura ve el último COMMIT en el momento de ejecutarse. Si otra sesión hace COMMIT entre las dos lecturas, el resultado cambia. Esto se llama lectura no repetible. Para evitarlo, se usa REPEATABLE READ, que toma un snapshot al inicio de la transacción y lo mantiene durante toda ella."
+
+### Verificación en el motor
+
+Salida real (REPEATABLE READ):
+
+```sql
+-- Sesión A con REPEATABLE READ
+BEGIN;
+SET TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+SELECT stock FROM producto WHERE nombre = 'Producto Test';
+-- lectura 1 = 10
+
+-- Sesión B
+BEGIN;
+UPDATE producto SET stock = 50 WHERE nombre = 'Producto Test';
+COMMIT;
+
+-- Sesión A (continúa)
+SELECT stock FROM producto WHERE nombre = 'Producto Test';
+-- lectura 2 = 10 (no cambió)
+
+ROLLBACK;
+```
+
+### Conclusión
+
+La explicación de la IA se confirmó. Con REPEATABLE READ la segunda lectura devolvió el mismo valor (10) pese a que la sesión B había commiteado el cambio a 50.
+
+---
+
+## Escenario 2: Lectura fantasma
+
+### Cómo se reprodujo
+
+**Sesión A:**
+```sql
+BEGIN;
+SET TRANSACTION ISOLATION LEVEL READ COMMITTED;
+SELECT COUNT(*) FROM producto WHERE activo = TRUE;
+```
+
+**Sesión B:**
+```sql
+BEGIN;
+INSERT INTO categoria (nombre) VALUES ('Nueva');
+INSERT INTO producto (nombre, precio, stock, activo, categoria_id)
+VALUES ('Test Fantasma', 100.00, 5, TRUE, (SELECT id FROM categoria WHERE nombre = 'Nueva'));
+COMMIT;
+```
+
+**Sesión A (continúa):**
+```sql
+SELECT COUNT(*) FROM producto WHERE activo = TRUE;
+COMMIT;
+```
+
+### Qué se observó
+
+Salida real (READ COMMITTED):
+
+| Momento | Sesión A (COUNT) | Sesión B (INSERT) |
+|---|---|---|
+| Primera lectura | COUNT = 1 | — |
+| — | — | INSERT producto; COMMIT |
+| Segunda lectura | COUNT = 2 | — |
+
+Apareció una fila nueva (fantasma) que cumplía la condición del WHERE.
+
+### Explicación de la IA
+
+Herramienta: **OpenCode**
+
+&gt; "Con READ COMMITTED, cada COUNT ve las filas commiteadas al momento de ejecutarse. Si otra sesión inserta y commitea una fila nueva entre los dos COUNT, el segundo la incluye. Esto se llama lectura fantasma. Para evitarlo, se usa SERIALIZABLE, que bloquea las filas que cumplieron el WHERE durante toda la transacción."
+
+### Verificación en el motor
+
+Salida real (SERIALIZABLE):
+
+```sql
+-- Sesión A con SERIALIZABLE
+BEGIN;
+SET TRANSACTION ISOLATION LEVEL SERIALIZABLE;
+SELECT COUNT(*) FROM producto WHERE activo = TRUE;
+-- primer COUNT = 2
+
+-- Sesión B
+BEGIN;
+INSERT INTO categoria (nombre) VALUES ('FantasmaNueva2');
+INSERT INTO producto (nombre, precio, stock, activo, categoria_id)
+VALUES ('FantasmaY', 100.00, 5, TRUE, (SELECT id FROM categoria WHERE nombre = 'FantasmaNueva2'));
+COMMIT;
+
+-- Sesión A (continúa)
+SELECT COUNT(*) FROM producto WHERE activo = TRUE;
+-- segundo COUNT = 2 (no cambió, el fantasma no aparece)
+
+ROLLBACK;
+```
+
+### Conclusión
+
+La explicación de la IA se confirmó. Con SERIALIZABLE el fantasma no aparece: el segundo COUNT devolvió el mismo valor (2) pese a que la sesión B insertó y commiteó una fila nueva.
+
+---
+
+## Escenario 3: Espera por bloqueo
+
+### Cómo se reprodujo
+
+**Sesión A:**
+```sql
+BEGIN;
+SELECT nombre FROM producto WHERE nombre = 'Producto Lock' FOR UPDATE;
+-- (no hace COMMIT todavía; retiene el lock 5 segundos)
+```
+
+**Sesión B:**
+```sql
+BEGIN;
+SELECT nombre FROM producto WHERE nombre = 'Producto Lock' FOR UPDATE;
+-- SE BLOQUEA: queda esperando a que la sesión A haga COMMIT o ROLLBACK
+```
+
+**Sesión A (tras 5 segundos):**
+```sql
+ROLLBACK;
+-- libera el lock, la sesión B se desbloquea
+```
+
+### Qué se observó
+
+Salida real:
+
+| Momento | Sesión A | Sesión B |
+|---|---|---|
+| T=0 | `SELECT ... FOR UPDATE` → OK, toma el lock | — |
+| T=2s | (retiene el lock) | `SELECT ... FOR UPDATE` → BLOQUEADA |
+| T=5s | `ROLLBACK` → libera el lock | Se desbloquea y devuelve la fila |
+
+Medición real: la sesión B tardó **~3.4 segundos** en completar el `FOR UPDATE`, es decir, quedó esperando hasta que la sesión A hizo ROLLBACK. La sesión B quedó bloqueada, no falló.
+
+### Explicación de la IA
+
+Herramienta: **OpenCode**
+
+&gt; "FOR UPDATE toma un lock exclusivo sobre las filas que matchean el WHERE. Si otra sesión intenta tomar FOR UPDATE sobre la misma fila, queda en espera (no falla, solo bloquea). El lock se libera con COMMIT o ROLLBACK. Esto es un mecanismo normal de concurrencia, no es un error."
+
+### Verificación en el motor
+
+Se ejecutó en el motor real y se confirmó que:
+1. La sesión B quedó bloqueada (~3.4 segundos de espera real medidos con Stopwatch).
+2. Al hacer ROLLBACK en A, B se desbloqueó y recibió la fila.
+
+Comandos que dieron las salidas reales:
+
+```sql
+-- SESION A (job en segundo plano)
+BEGIN;
+SELECT ... FROM producto WHERE nombre = 'Producto Lock' FOR UPDATE;
+SELECT pg_sleep(5);
+ROLLBACK;
+
+-- SESION B (ejecutada al mismo tiempo)
+SELECT ... FROM producto WHERE nombre = 'Producto Lock' FOR UPDATE;
+-- -&gt; tarda 3.4 s (bloqueada) y recién entonces devuelve la fila
+```
+
+3. El nivel de aislamiento no afecta este comportamiento: el lock exclusivo por `FOR UPDATE` ocurre igual en READ COMMITTED y REPEATABLE READ.
+
+### Conclusión
+
+La explicación de la IA se confirmó. El bloqueo por `FOR UPDATE` es el mecanismo esperado: la sesión B espera hasta que la sesión A libera el lock. No es un problema a resolver, es el comportamiento correcto del motor para garantizar exclusión mutua.
+</code></pre></div></body></html>
