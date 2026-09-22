@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>TP4 — Evidencias</title>
+<style>
+  body { font-family: "Segoe UI", Arial, sans-serif; margin: 24px; color: #1a1a1a; }
+  h1 { font-size: 22px; border-bottom: 2px solid #2c5aa0; padding-bottom: 6px; }
+  h2 { font-size: 18px; color: #2c5aa0; margin-top: 28px; }
+  h3 { font-size: 15px; margin-top: 20px; }
+  pre { background: #f5f5f5; border: 1px solid #ddd; border-radius: 4px; padding: 10px;
+        font-family: Consolas, monospace; font-size: 11.5px; line-height: 1.35; overflow-x: auto; white-space: pre; }
+  .sql { background: #eef4fb; border-color: #b8d0ea; }
+  .plan { background: #fbf8ec; border-color: #e3d9a8; }
+  table { border-collapse: collapse; margin: 10px 0; font-size: 12.5px; }
+  th, td { border: 1px solid #999; padding: 5px 9px; text-align: left; }
+  th { background: #e7edf6; }
+  .ok { color: #1a7f37; font-weight: bold; }
+  .bad { color: #c0392b; font-weight: bold; }
+  .tag { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px;
+         background: #dff0d8; color: #1a7f37; font-weight: bold; }
+  .tag2 { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px;
+          background: #fdecea; color: #c0392b; font-weight: bold; }
+</style>
+</head>
+<body>
+
+<h1>TP4 — Evidencias · Reportes analíticos asistidos por IA (Semana 4)</h1>
+
+<h2>Parte 1 — Consulta 1 (facturación por categoría y mes, 4 tablas) · ANTES</h2>
+<p>SQL del ejercicio 1: <code>detalle_pedido ⋈ pedido ⋈ producto ⋈ categoria</code></p>
+<pre class="sql">-- 1
+EXPLAIN ANALYZE
+SELECT to_char(date_trunc('month', p.fecha), 'YYYY-MM') AS mes,
+       c.nombre AS categoria, sum(dp.subtotal) AS facturado
+FROM detalle_pedido dp
+JOIN pedido    p  ON p.id  = dp.pedido_id
+JOIN producto  pr ON pr.id = dp.producto_id
+JOIN categoria c  ON c.id  = pr.categoria_id
+GROUP BY mes, c.nombre
+ORDER BY mes, facturado DESC;</pre>
+<p class="tag">Tiempo real: 4387.557 ms</p>
+<pre class="plan">Incremental Sort  (cost=114130.92..146885.70 rows=600000 width=72) (actual time=4141.474..4359.437 rows=60.00 loops=1)
+  → GroupAggregate (Group Key: mes, c.nombre) rows=600000 → 60
+    → Sort (external merge, Disk: 20160kB) rows=600000
+      → HASH JOIN (Hash Cond: pr.categoria_id = c.id)      [algoritmo: HASH JOIN]
+          Hash (rows=4) → Seq Scan categoria
+        → HASH JOIN (Hash Cond: dp.producto_id = pr.id)    [algoritmo: HASH JOIN]
+            Hash (rows=50000) → Seq Scan producto
+          → HASH JOIN (Hash Cond: dp.pedido_id = p.id)     [algoritmo: HASH JOIN]
+              Seq Scan detalle_pedido (rows 600000)
+            Hash (rows=200000) → Seq Scan pedido
+Execution Time: 4387.557 ms</pre>
+
+<h3>Parte 1 — Consulta 1 · DESPUÉS (reescritura, ejercicio 3)</h3>
+<p class="tag">Tiempo real: 2052.146 ms · Mejora: 2,14×</p>
+<pre class="sql">-- 3
+EXPLAIN ANALYZE
+SELECT v.mes, c.nombre AS categoria, v.facturado
+FROM ( SELECT to_char(date_trunc('month', p.fecha), 'YYYY-MM') AS mes,
+              pr.categoria_id, sum(dp.subtotal) AS facturado
+       FROM detalle_pedido dp
+       JOIN pedido    p  ON p.id  = dp.pedido_id
+       JOIN producto  pr ON pr.id = dp.producto_id
+       GROUP BY mes, pr.categoria_id ) v
+JOIN categoria c ON c.id = v.categoria_id
+ORDER BY v.mes, v.facturado DESC;</pre>
+<pre class="plan">Sort (quicksort 27kB) rows=60   ← ya NO hay sort a disco de 20 MB
+  → Hash Join (Hash Cond: pr.categoria_id = c.id)      [algoritmo: HASH JOIN]
+      HashAggregate (Group Key: mes, pr.categoria_id) rows 600000 → 60
+        → Hash Join (dp.producto_id = pr.id)           [algoritmo: HASH JOIN]
+            Hash Join (dp.pedido_id = p.id)            [algoritmo: HASH JOIN]
+              Seq Scan detalle_pedido
+              Hash (rows=200000) → Seq Scan pedido
+            Hash (rows=50000) → Seq Scan producto
+      Hash (rows=4) → Seq Scan categoria
+Execution Time: 2052.146 ms</pre>
+
+<h3>Índice de cobertura aplicado (ejercicio 4)</h3>
+<pre class="sql">-- 4
+CREATE INDEX idx_detalle_cover_pedido_prod
+    ON detalle_pedido (pedido_id, producto_id) INCLUDE (subtotal);</pre>
+
+<h2>Parte 1 — Consulta 2 (ranking clientes por gasto, 3 tablas)</h2>
+<h3>ANTES (ejercicio 2)</h3>
+<p class="tag">Tiempo real: 753.714 ms</p>
+<pre class="plan">Limit (top-N heapsort, rows=20)
+  Sort (sum(dp.subtotal) DESC) rows 20000
+    Finalize HashAggregate (Group Key: cl.id, Batches: 5, Disk Usage)
+      Gather (Workers Planned: 2, Workers Launched: 2)
+        Partial HashAggregate
+          HASH JOIN (Hash Cond: p.cliente_id = cl.id)   [algoritmo: HASH JOIN]
+            PARALLEL HASH JOIN (Hash Cond: dp.pedido_id = p.id)  [algoritmo: PARALLEL HASH JOIN]
+              Parallel Seq Scan detalle_pedido
+              Hash (rows=117647) → Parallel Seq Scan pedido
+            Hash (rows=20000) → Seq Scan cliente
+Execution Time: 753.714 ms</pre>
+<h3>DESPUÉS (ejercicio 5, tras índice propuesto y descartado)</h3>
+<p class="bad">Sin mejora: 751.275 ms · el índice en pedido(cliente_id,fecha) no cambió el plan → propuesta descartada (registrada en bitácora)</p>
+<pre class="plan">Execution Time: 751.275 ms
+(mismo plan: Parallel Hash Join + Hash Join; el cuello de botella es el spill del HashAggregate)</pre>
+
+<h2>Parte 2 — Lectura crítica del plan de join</h2>
+<table>
+<tr><th>Afirmación de la IA</th><th>¿Correcta?</th><th>Corrección / evidencia del plan real</th></tr>
+<tr><td>"El plan usa Nested Loop para unir detalle_pedido con pedido, buscando por índice en cada fila"</td>
+    <td class="bad">No</td>
+    <td>El plan real usa <b>Hash Join</b> en los tres nodos; no hay Nested Loop ni uso de índice en esas uniones.</td></tr>
+<tr><td>"La tabla externa es detalle_pedido y por cada fila se busca en pedido por índice"</td>
+    <td class="bad">No</td>
+    <td>En Hash Join no hay externa/interna como en Nested Loop; el build es un <b>Hash sobre pedido (rows=200000)</b> y el probe es detalle_pedido.</td></tr>
+<tr><td>"El tercer join contra categoria es el más caro y su costo 38088 es el tiempo total"</td>
+    <td class="bad">No</td>
+    <td>El build contra categoria es un <b>Hash de 4 filas</b>; 38088 son <b>unidades de costo estimado</b>, no ms. Tiempo total real: <b>4387 ms</b>.</td></tr>
+<tr><td>"La agregación ordena 600.000 filas por mes y categoría"</td>
+    <td class="ok">Sí</td>
+    <td>El plan muestra <code>Sort ... external merge Disk: 20160kB</code> y GroupAggregate con ese Group Key.</td></tr>
+</table>
+<p><span class="tag2">3 imprecisiones reales detectadas</span> sobre planes con varios JOIN.</p>
+
+<h2>Parte 3 — Ranking con función de ventana (spec a)</h2>
+<h3>Especificación precisa</h3>
+<pre class="sql">
+"Para cada cliente vigente con al menos un pedido: nombre completo, total gastado
+ (suma de detalle_pedido.subtotal) y puesto en ranking de mayor a menor gasto,
+ sin colapsar filas. Empates comparten el mismo puesto. No usés SELECT *."</pre>
+<h3>Versión 1 — RANK() (ventana)</h3>
+<pre class="sql">-- 3a
+WITH g AS (
+    SELECT p.cliente_id, sum(dp.subtotal) AS total
+    FROM pedido p JOIN detalle_pedido dp ON dp.pedido_id = p.id
+    GROUP BY p.cliente_id
+)
+SELECT cl.id, cl.nombre, cl.apellido, g.total,
+       RANK() OVER (ORDER BY g.total DESC) AS puesto
+FROM g JOIN cliente cl ON cl.id = g.cliente_id
+ORDER BY puesto, cl.id;</pre>
+<h3>Versión 2 — subconsulta correlacionada replicando RANK</h3>
+<pre class="sql">-- 3b
+WITH g AS ( ...mismo CTE... )
+SELECT cl.id, cl.nombre, cl.apellido, g.total,
+       (SELECT count(*) + 1 FROM g h WHERE h.total &gt; g.total)::bigint AS puesto
+FROM g JOIN cliente cl ON cl.id = g.cliente_id
+ORDER BY (SELECT count(*) + 1 FROM g h WHERE h.total &gt; g.total), cl.id;</pre>
+<p><b>Verificación de equivalencia:</b></p>
+<pre class="sql">-- 3c / 3d
+(v1) EXCEPT (v2);  → 0 filas
+(v2) EXCEPT (v1);  → 0 filas</pre>
+<p class="ok">EQUIVALENTES — 0 filas en ambas direcciones</p>
+
+<h2>Parte 3 — Subconsulta correlacionada (spec b)</h2>
+<h3>Especificación precisa</h3>
+<pre class="sql">
+"Para cada producto: nombre, precio y la diferencia entre su precio y el precio
+ promedio de los productos de su misma categoría (subconsulta correlacionada).
+ Incluí todos los productos. No usés SELECT *."</pre>
+<h3>Versión 1 — subconsulta correlacionada</h3>
+<pre class="sql">-- 3e
+SELECT p.id, p.nombre AS producto, p.precio,
+       round(p.precio - (SELECT avg(p2.precio) FROM producto p2
+                         WHERE p2.categoria_id = p.categoria_id), 2) AS dif_vs_categoria
+FROM producto p; -- (LIMIT 50 solo para el preview)</pre>
+<h3>Versión 2 — join + agregación (estructura distinta)</h3>
+<pre class="sql">-- 3f
+SELECT p.id, p.nombre AS producto, p.precio,
+       round(p.precio - c.promedio, 2) AS dif_vs_categoria
+FROM producto p
+JOIN (SELECT categoria_id, avg(precio) AS promedio
+      FROM producto GROUP BY categoria_id) c
+  ON c.categoria_id = p.categoria_id; -- (LIMIT 50 solo para el preview)</pre>
+<p><b>Verificación de equivalencia:</b></p>
+<pre class="sql">-- 3g / 3h
+(v1) EXCEPT (v2);  → 0 filas
+(v2) EXCEPT (v1);  → 0 filas</pre>
+<p class="ok">EQUIVALENTES — 0 filas en ambas direcciones</p>
+
+<h2>Parte 4 — Competencia de optimización</h2>
+<table>
+<tr><th>Equipo</th><th>Estrategia aplicada</th><th>Antes (ms)</th><th>Después (ms)</th><th>Mejora (x)</th></tr>
+<tr><td>Nuestro equipo</td><td>Reescritura (agregación anticipada por categoria_id + join final) + índice de cobertura</td>
+    <td>4387</td><td><b>2052</b></td><td><b>2,14×</b></td></tr>
+</table>
+<h3>Propuestas de la IA que no funcionaron</h3>
+<table>
+<tr><th>Propuesta</th><th>Por qué se descartó</th></tr>
+<tr><td>Índice en pedido(cliente_id, fecha)</td><td>No cambió el plan ni el tiempo real (754→751 ms); el cuello era el spill del HashAggregate (Batches 5).</td></tr>
+<tr><td>Índice de cobertura "solo" (sin reescritura)</td><td>Redujo buffers pero sin reescritura solo bajaba a ~3530 ms; el cambio determinante fue la reescritura.</td></tr>
+</table>
+
+</body>
+</html>
