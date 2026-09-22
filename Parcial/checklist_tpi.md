@@ -16,6 +16,12 @@ Esquema base: `schema.sql` (los `*_prueba` referencian archivos de esta carpeta 
 | 8 | Transacciones: atomicidad, COMMIT/ROLLBACK, aislamientos, concurrencia | `04_transacciones.md` + `transacciones_prueba.sql` (3 aislamientos + deadlock simulado) | ☐ |
 | 9 | Borrado lógico (soft delete) e impacto en consultas e índices | `05_borrado_logico.md` + `borrado_logico_prueba.sql` + índice parcial `WHERE activo` | ☐ |
 
+**Requisitos técnicos del motor (PostgreSQL 16+):**
+- ✅ ENUM (`forma_pago_enum`) · TIMESTAMPTZ · IDENTITY · CHECK · UNIQUE → `ddl.sql`
+- ✅ Tablas de transición en trigger (`REFERENCING OLD/NEW TABLE`, `FOR EACH STATEMENT`) → `objetos_avanzados.sql` (demo: 1 disparo para 12.500 filas, verificado)
+- ✅ JSONB con operadores `->>`, `->`, `@>`, cast booleano → `objetos_avanzados.sql` (demo verificado)
+- ✅ Procedimiento PL/pgSQL con `CALL` → `objetos.sql`
+
 **Informe técnico (obligatorio por la cátedra):** `06_informe_tecnico.md`.
 **Defensa oral:** `07_defensa_oral.md` (resumen de 1 página para defender el proyecto).
 

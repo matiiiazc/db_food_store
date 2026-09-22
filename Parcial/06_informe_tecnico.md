@@ -65,6 +65,14 @@ Costo de escritura medido: 300 INSERT → 47,5 ms sin los índices nuevos vs 151
 
 `activo` en `categoria`/`producto`, trigger anti-DELETE y su impacto en consultas e índices (vista vigente, índice parcial `WHERE activo`) → `05_borrado_logico.md` (demo ejecutada: 50.000 → 49.999 en catálogo, histórico intacto).
 
+## Requisitos técnicos del motor (PostgreSQL 16+)
+
+**Quién los acredita:**
+- ENUM (`forma_pago_enum`), `TIMESTAMPTZ`, `IDENTITY`, CHECK y UNIQUE → `ddl.sql`.
+- **Tablas de transición** en triggers (`REFERENCING OLD TABLE AS ... NEW TABLE AS ...`, `FOR EACH STATEMENT`) → `objetos_avanzados.sql`. Se auditó un ajuste de precio sobre toda la categoría 1 (12.500 filas) y el trigger statement hizo **un solo disparo** (1 fila en `auditoria_precios`, diff promedio +275,63). Probado y revertido con ROLLBACK.
+- **JSONB** (datos semiestructurados de producto: origen, vegano, etiquetas, info nutricional) → `objetos_avanzados.sql`. Se demostraron los operadores `->>`, `->`, `@>` (filtro por etiqueta) y el acceso a valores anidados con cast booleano.
+- **Procedimiento PL/pgSQL invocado con `CALL`** → `objetos.sql`.
+
 ## Uso de IA
 
 **Herramientas:** OpenCode (IA primaria) y Kiro (requerido por cátedra, **no instalado en la máquina**: los specs se redactaron manualmente con la plantilla de Kiro y se aclara en cada DUIA).
