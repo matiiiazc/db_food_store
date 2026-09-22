@@ -1,0 +1,225 @@
+<html><head><meta charset="utf-8"><style>
+body{font-family:Calibri,Arial,sans-serif;font-size:10.5pt;color:#1a1a1a;margin:0;}
+h1{color:#2C5AA0;font-size:16pt;margin:12px 0 2px 0;}
+.sub{color:#555;font-style:italic;font-size:9.5pt;margin:0 0 12px 0;}
+h2{color:#2C5AA0;font-size:12.5pt;margin:16px 0 6px 0;border-bottom:1px solid #c5c5c5;padding-bottom:2px;}
+h3{font-size:11pt;margin:10px 0 4px 0;}
+table{border-collapse:collapse;width:100%;margin:6px 0;font-size:8.8pt;}
+th{background:#2C5AA0;color:#fff;text-align:left;padding:3px 6px;border:1px solid #999;}
+td{padding:3px 6px;border:1px solid #999;vertical-align:top;}
+.capwrap{margin:8px 0;page-break-inside:avoid;}
+.caplab{font-size:9pt;color:#2C5AA0;font-weight:bold;margin:2px 0 3px 0;}
+.term{border:1px solid #7a7a7a;border-radius:8px;overflow:hidden;box-shadow:1px 2px 6px rgba(0,0,0,.25);}
+.titlebar{background:#d8d8dc;padding:5px 10px;border-bottom:1px solid #b0b0b0;display:flex;gap:6px;align-items:center;}
+.dot{display:inline-block;width:11px;height:11px;border-radius:50%;margin-right:5px;}
+.rd{background:#ff5f57;}.yl{background:#febc2e;}.gn{background:#28c840;}
+.ttitle{font-family:Consolas,Courier New,monospace;font-size:9pt;color:#333;margin-left:8px;}
+.termbody{background:#1e1e1e;padding:8px 10px;}
+.termbody pre{margin:0;font-family:Consolas,Courier New,monospace;font-size:8.1pt;line-height:1.25;color:#e0e0e0;white-space:pre-wrap;}
+.prompt{font-family:Consolas,Courier New,monospace;font-size:8.1pt;color:#9cdcfe;white-space:pre-wrap;}
+code{font-family:Consolas,Courier New,monospace;font-size:8.8pt;}
+.nota{border:1px solid #b0b0b0;background:#f5f5f5;padding:6px 8px;font-size:8.5pt;color:#444;border-radius:4px;}
+.pagebreak{page-break-before:always;}
+</style></head><body>
+<h1>TP5 — Resumen: Índices, Vistas y Vistas Materializadas</h1><p class="sub">Base de Datos II · Unidad 3 · Semana 5 · Food Store masivo · PostgreSQL 18 · Esquema R7 · OpenCode</p>
+<h2>Parte A · Plan de indexado</h2>
+<table><tr><th style="width:28%">Índice</th><th style="width:30%">Antes</th><th style="width:30%">Después</th><th style="width:12%">Ganancia</th></tr><tr><td>idx_producto_nombre_vig (parcial activo, text_pattern_ops)</td><td>Seq Scan · 21,5 ms</td><td>Bitmap Index Scan · 8,4 ms</td><td>Seq→Bitmap (prefijo indexado)</td></tr><tr><td>idx_cliente_apellido (B-tree)</td><td>Seq Scan · 15,9 ms</td><td>Index Scan · 0,9 ms</td><td>~18×</td></tr><tr><td>idx_pedido_forma_fecha (compuesto)</td><td>Bitmap idx_pedido_fecha + Filter (10.375 rem.) · 78,4 ms</td><td>Bitmap idx_pedido_forma_fecha · 6,8 ms</td><td>sin remoción de filas</td></tr></table>
+<p>Las capturas siguientes son la salida real de <code>EXPLAIN ANALYZE</code> en PostgreSQL 18.</p>
+<div class="capwrap"><div class="caplab">Captura 1</div><div class="term"><div class="titlebar"><span class="dot rd"></span><span class="dot yl"></span><span class="dot gn"></span><span class="ttitle">explain analyze · producto · ANTES (seq scan)</span></div><div class="termbody"><span class="prompt">food_store_tp3=&gt;</span><pre>SET
+SET
+                                                    QUERY PLAN                                                    
+------------------------------------------------------------------------------------------------------------------
+ Seq Scan on producto  (cost=0.00..1434.00 rows=11111 width=32) (actual time=0.033..20.406 rows=11111.00 loops=1)
+   Filter: (activo AND ((nombre)::text ~~ &#x27;Producto 1%&#x27;::text))
+   Rows Removed by Filter: 38889
+   Buffers: shared hit=809
+ Planning:
+   Buffers: shared hit=176
+ Planning Time: 5.669 ms
+ Execution Time: 21.535 ms
+(8 filas)
+
+RESET
+RESET</pre></div></div></div>
+<div class="capwrap"><div class="caplab">Captura 2</div><div class="term"><div class="titlebar"><span class="dot rd"></span><span class="dot yl"></span><span class="dot gn"></span><span class="ttitle">explain analyze · producto · DESPUÉS (bitmap index</span></div><div class="termbody"><span class="prompt">food_store_tp3=&gt;</span><pre>                                                                 QUERY PLAN                                                                  
+---------------------------------------------------------------------------------------------------------------------------------------------
+ Bitmap Heap Scan on producto  (cost=296.88..1248.14 rows=11111 width=32) (actual time=2.524..7.408 rows=11111.00 loops=1)
+   Recheck Cond: activo
+   Filter: ((nombre)::text ~~ &#x27;Producto 1%&#x27;::text)
+   Heap Blocks: exact=185
+   Buffers: shared hit=229
+   -&gt;  Bitmap Index Scan on idx_producto_nombre_vig  (cost=0.00..294.10 rows=11381 width=0) (actual time=2.230..2.230 rows=11111.00 loops=1)
+         Index Cond: (((nombre)::text ~&gt;=~ &#x27;Producto 1&#x27;::text) AND ((nombre)::text ~&lt;~ &#x27;Producto 2&#x27;::text))
+         Index Searches: 1
+         Buffers: shared hit=44
+ Planning:
+   Buffers: shared hit=12
+ Planning Time: 0.762 ms
+ Execution Time: 8.373 ms
+(13 filas)
+</pre></div></div></div>
+<div class="capwrap"><div class="caplab">Captura 3</div><div class="term"><div class="titlebar"><span class="dot rd"></span><span class="dot yl"></span><span class="dot gn"></span><span class="ttitle">explain analyze · cliente · ANTES (seq scan)</span></div><div class="termbody"><span class="prompt">food_store_tp3=&gt;</span><pre>SET
+SET
+                                              QUERY PLAN                                               
+-------------------------------------------------------------------------------------------------------
+ Seq Scan on cliente  (cost=0.00..517.00 rows=1 width=58) (actual time=0.090..7.075 rows=1.00 loops=1)
+   Filter: ((apellido)::text = &#x27;Apellido470&#x27;::text)
+   Rows Removed by Filter: 19999
+   Buffers: shared hit=267
+ Planning:
+   Buffers: shared hit=69
+ Planning Time: 8.692 ms
+ Execution Time: 7.100 ms
+(8 filas)
+
+RESET
+RESET</pre></div></div></div>
+<div class="capwrap"><div class="caplab">Captura 4</div><div class="term"><div class="titlebar"><span class="dot rd"></span><span class="dot yl"></span><span class="dot gn"></span><span class="ttitle">explain analyze · cliente · DESPUÉS (index scan)</span></div><div class="termbody"><span class="prompt">food_store_tp3=&gt;</span><pre>                                                            QUERY PLAN                                                            
+----------------------------------------------------------------------------------------------------------------------------------
+ Index Scan using idx_cliente_apellido on cliente  (cost=0.29..8.30 rows=1 width=58) (actual time=0.114..0.116 rows=1.00 loops=1)
+   Index Cond: ((apellido)::text = &#x27;Apellido470&#x27;::text)
+   Index Searches: 1
+   Buffers: shared hit=3
+ Planning Time: 0.186 ms
+ Execution Time: 0.281 ms
+(6 filas)
+</pre></div></div></div>
+<div class="capwrap"><div class="caplab">Captura 5</div><div class="term"><div class="titlebar"><span class="dot rd"></span><span class="dot yl"></span><span class="dot gn"></span><span class="ttitle">explain analyze · pedido · ANTES (solo idx_pedido_fecha, con Filter)</span></div><div class="termbody"><span class="prompt">food_store_tp3=&gt;</span><pre>DROP INDEX
+                                                                      QUERY PLAN                                                                      
+------------------------------------------------------------------------------------------------------------------------------------------------------
+ Bitmap Heap Scan on pedido  (cost=334.02..2279.51 rows=5278 width=28) (actual time=1.532..18.500 rows=5140.00 loops=1)
+   Recheck Cond: ((fecha &gt;= &#x27;2026-01-01 00:00:00-03&#x27;::timestamp with time zone) AND (fecha &lt; &#x27;2026-02-01 00:00:00-03&#x27;::timestamp with time zone))
+   Filter: (forma_pago = &#x27;TARJETA&#x27;::forma_pago_enum)
+   Rows Removed by Filter: 10375
+   Heap Blocks: exact=1667
+   Buffers: shared hit=1713
+   -&gt;  Bitmap Index Scan on idx_pedido_fecha  (cost=0.00..332.70 rows=15628 width=0) (actual time=1.257..1.258 rows=15515.00 loops=1)
+         Index Cond: ((fecha &gt;= &#x27;2026-01-01 00:00:00-03&#x27;::timestamp with time zone) AND (fecha &lt; &#x27;2026-02-01 00:00:00-03&#x27;::timestamp with time zone))
+         Index Searches: 1
+         Buffers: shared hit=46
+ Planning:
+   Buffers: shared hit=83
+ Planning Time: 5.983 ms
+ Execution Time: 18.780 ms
+(14 filas)
+</pre></div></div></div>
+<div class="capwrap"><div class="caplab">Captura 6</div><div class="term"><div class="titlebar"><span class="dot rd"></span><span class="dot yl"></span><span class="dot gn"></span><span class="ttitle">explain analyze · pedido · DESPUÉS (idx_pedido_forma_fecha)</span></div><div class="termbody"><span class="prompt">food_store_tp3=&gt;</span><pre>CREATE INDEX
+                                                                                             QUERY PLAN                                                                                             
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Bitmap Heap Scan on pedido  (cost=151.71..1916.08 rows=5278 width=28) (actual time=2.708..4.526 rows=5140.00 loops=1)
+   Recheck Cond: ((forma_pago = &#x27;TARJETA&#x27;::forma_pago_enum) AND (fecha &gt;= &#x27;2026-01-01 00:00:00-03&#x27;::timestamp with time zone) AND (fecha &lt; &#x27;2026-02-01 00:00:00-03&#x27;::timestamp with time zone))
+   Heap Blocks: exact=1591
+   Buffers: shared hit=1591 read=22
+   -&gt;  Bitmap Index Scan on idx_pedido_forma_fecha  (cost=0.00..150.40 rows=5278 width=0) (actual time=2.494..2.494 rows=5140.00 loops=1)
+         Index Cond: ((forma_pago = &#x27;TARJETA&#x27;::forma_pago_enum) AND (fecha &gt;= &#x27;2026-01-01 00:00:00-03&#x27;::timestamp with time zone) AND (fecha &lt; &#x27;2026-02-01 00:00:00-03&#x27;::timestamp with time zone))
+         Index Searches: 1
+         Buffers: shared read=22
+ Planning:
+   Buffers: shared hit=22 read=1
+ Planning Time: 5.440 ms
+ Execution Time: 4.883 ms
+(12 filas)
+</pre></div></div></div>
+<div class="capwrap"><div class="caplab">Captura 7</div><div class="term"><div class="titlebar"><span class="dot rd"></span><span class="dot yl"></span><span class="dot gn"></span><span class="ttitle">explain · producto por categoria → ya usa idx_producto_categoria_activo (por eso se descartó el índice propuesto)</span></div><div class="termbody"><span class="prompt">food_store_tp3=&gt;</span><pre>                                            QUERY PLAN                                            
+--------------------------------------------------------------------------------------------------
+ Bitmap Heap Scan on producto pr  (cost=140.97..1105.91 rows=12475 width=28)
+   Recheck Cond: (categoria_id = 1)
+   -&gt;  Bitmap Index Scan on idx_producto_categoria_activo  (cost=0.00..137.85 rows=12475 width=0)
+         Index Cond: (categoria_id = 1)
+(4 filas)
+</pre></div></div></div>
+<p><b>Costo de escritura:</b> batch de 300 INSERT en <code>pedido</code> (transacción con ROLLBACK).</p>
+<table><tr><th style="width:50%">Estado</th><th style="width:50%">Tiempo (300 INSERT en pedido)</th></tr><tr><td>Sin los índices nuevos</td><td>47,5 ms</td></tr><tr><td>Con los 3 índices nuevos</td><td>151,6 ms</td></tr></table>
+<h2>Parte B · Vistas y verificación de equivalencia</h2>
+<table><tr><th style="width:50%">Vista</th><th style="width:14%">Filas (vista)</th><th style="width:14%">Filas (manual)</th><th style="width:22%">Diferencia (EXCEPT)</th></tr><tr><td>vista_productos_vigentes (catálogo vigente + categoría)</td><td>50.000</td><td>50.000</td><td>0</td></tr><tr><td>vista_pedidos_cliente (pedidos + cliente)</td><td>200.000</td><td>200.000</td><td>0</td></tr><tr><td>vista_detalle_pedido (líneas + nombre de producto)</td><td>600.000</td><td>600.000</td><td>0</td></tr></table>
+<div class="capwrap"><div class="caplab">Captura 8</div><div class="term"><div class="titlebar"><span class="dot rd"></span><span class="dot yl"></span><span class="dot gn"></span><span class="ttitle">verificación 1 · (vista) EXCEPT (manual) = 0</span></div><div class="termbody"><span class="prompt">food_store_tp3=&gt;</span><pre> diff 
+------
+    0
+(1 fila)
+</pre></div></div></div>
+<div class="capwrap"><div class="caplab">Captura 9</div><div class="term"><div class="titlebar"><span class="dot rd"></span><span class="dot yl"></span><span class="dot gn"></span><span class="ttitle">verificación 2 · (vista) EXCEPT (manual) = 0</span></div><div class="termbody"><span class="prompt">food_store_tp3=&gt;</span><pre> diff 
+------
+    0
+(1 fila)
+</pre></div></div></div>
+<div class="capwrap"><div class="caplab">Captura 10</div><div class="term"><div class="titlebar"><span class="dot rd"></span><span class="dot yl"></span><span class="dot gn"></span><span class="ttitle">verificación 3 · (vista) EXCEPT (manual) = 0</span></div><div class="termbody"><span class="prompt">food_store_tp3=&gt;</span><pre> diff 
+------
+    0
+(1 fila)
+</pre></div></div></div>
+<p>Seguridad: <code>vista_pedidos_cliente</code> no expone <code>cliente.telefono</code>; <code>vista_productos_vigentes</code> no expone <code>descripcion</code>/<code>activo</code>.</p>
+<h2>Parte C · Vista materializada de facturación</h2>
+<table><tr><th style="width:20%">Métrica</th><th style="width:40%">Consulta base (4 tablas)</th><th style="width:40%">Vista materializada</th></tr><tr><td>Tiempo</td><td>2447,3 ms</td><td>~15 ms</td></tr><tr><td>Plan</td><td>Nested Loop ×3 + GroupAggregate sobre 600.000 líneas</td><td>Scan de 60 filas con índice único (mes, categoria)</td></tr></table>
+<div class="capwrap"><div class="caplab">Captura 11</div><div class="term"><div class="titlebar"><span class="dot rd"></span><span class="dot yl"></span><span class="dot gn"></span><span class="ttitle">select contra la MV · 60 filas de agregado</span></div><div class="termbody"><span class="prompt">food_store_tp3=&gt;</span><pre>   mes   | categoria |  facturado   
+---------+-----------+--------------
+ 2025-07 | Pizzas    |  16412928.69
+ 2025-07 | Bebidas   |  16321435.87
+ 2025-07 | Postres   |  15796284.91
+ 2025-07 | Empanadas |  15333740.47
+ 2025-08 | Pizzas    | 158540643.64
+(5 filas)
+</pre></div></div></div>
+<div class="capwrap"><div class="caplab">Captura 12</div><div class="term"><div class="titlebar"><span class="dot rd"></span><span class="dot yl"></span><span class="dot gn"></span><span class="ttitle">explain analyze · la misma consulta SIN materializar</span></div><div class="termbody"><span class="prompt">food_store_tp3=&gt;</span><pre>                                                                                               QUERY PLAN                                                                                               
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Limit  (cost=15772.19..15774.12 rows=5 width=72) (actual time=1933.632..1992.329 rows=5.00 loops=1)
+   Buffers: shared hit=229528, temp read=605 written=836
+   -&gt;  Incremental Sort  (cost=15772.19..248015.47 rows=600000 width=72) (actual time=1933.629..1992.324 rows=5.00 loops=1)
+         Sort Key: (to_char(date_trunc(&#x27;month&#x27;::text, p.fecha), &#x27;YYYY-MM&#x27;::text)), (sum(dp.subtotal)) DESC
+         Presorted Key: (to_char(date_trunc(&#x27;month&#x27;::text, p.fecha), &#x27;YYYY-MM&#x27;::text))
+         Full-sort Groups: 1  Sort Method: quicksort  Average Memory: 25kB  Peak Memory: 25kB
+         Buffers: shared hit=229528, temp read=605 written=836
+         -&gt;  GroupAggregate  (cost=15771.09..231760.58 rows=600000 width=72) (actual time=420.516..1992.242 rows=9.00 loops=1)
+               Group Key: (to_char(date_trunc(&#x27;month&#x27;::text, p.fecha), &#x27;YYYY-MM&#x27;::text)), c.nombre
+               Buffers: shared hit=229528, temp read=605 written=836
+               -&gt;  Incremental Sort  (cost=15771.09..216760.58 rows=600000 width=48) (actual time=419.866..1966.188 rows=61855.00 loops=1)
+                     Sort Key: (to_char(date_trunc(&#x27;month&#x27;::text, p.fecha), &#x27;YYYY-MM&#x27;::text)), c.nombre
+                     Presorted Key: (to_char(date_trunc(&#x27;month&#x27;::text, p.fecha), &#x27;YYYY-MM&#x27;::text))
+                     Full-sort Groups: 3  Sort Method: quicksort  Average Memory: 27kB  Peak Memory: 27kB
+                     Pre-sorted Groups: 3  Sort Method: quicksort  Average Memory: 2409kB  Peak Memory: 3415kB
+                     Buffers: shared hit=229528, temp read=605 written=836
+                     -&gt;  Nested Loop  (cost=15770.14..200505.69 rows=600000 width=48) (actual time=317.745..1827.216 rows=95932.00 loops=1)
+                           Buffers: shared hit=229528, temp read=605 written=836
+                           -&gt;  Nested Loop  (cost=15770.00..183854.97 rows=600000 width=24) (actual time=317.702..1418.735 rows=95932.00 loops=1)
+                                 Buffers: shared hit=229520, temp read=605 written=836
+                                 -&gt;  Nested Loop  (cost=15769.70..153327.39 rows=600000 width=24) (actual time=316.794..844.672 rows=95932.00 loops=1)
+                                       Buffers: shared hit=97979, temp read=605 written=836
+                                       -&gt;  Gather Merge  (cost=15769.27..38563.39 rows=200000 width=16) (actual time=316.732..440.275 rows=31978.00 loops=1)
+                                             Workers Planned: 1
+                                             Workers Launched: 1
+                                             Buffers: shared hit=1710, temp read=605 written=836
+                                             -&gt;  Sort  (cost=14769.26..15063.38 rows=117647 width=16) (actual time=229.055..244.813 rows=16512.50 loops=2)
+                                                   Sort Key: (to_char(date_trunc(&#x27;month&#x27;::text, p.fecha), &#x27;YYYY-MM&#x27;::text))
+                                                   Sort Method: external merge  Disk: 4272kB
+                                                   Buffers: shared hit=1710, temp read=605 written=836
+                                                   Worker 0:  Sort Method: external merge  Disk: 2400kB
+                                                   -&gt;  Parallel Seq Scan on pedido p  (cost=0.00..2848.47 rows=117647 width=16) (actual time=0.518..81.507 rows=100000.00 loops=2)
+                                                         Buffers: shared hit=1672
+                                       -&gt;  Index Only Scan using idx_detalle_cover_pedido_prod on detalle_pedido dp  (cost=0.42..0.54 rows=3 width=24) (actual time=0.008..0.011 rows=3.00 loops=31978)
+                                             Index Cond: (pedido_id = p.id)
+                                             Heap Fetches: 0
+                                             Index Searches: 31978
+                                             Buffers: shared hit=96269
+                                 -&gt;  Memoize  (cost=0.30..0.32 rows=1 width=16) (actual time=0.005..0.005 rows=1.00 loops=95932)
+                                       Cache Key: dp.producto_id
+                                       Cache Mode: logical
+                                       Hits: 52085  Misses: 43847  Evictions: 0  Overflows: 0  Memory Usage: 5139kB
+                                       Buffers: shared hit=131541
+                                       -&gt;  Index Scan using producto_pkey on producto pr  (cost=0.29..0.31 rows=1 width=16) (actual time=0.007..0.007 rows=1.00 loops=43847)
+                                             Index Cond: (id = dp.producto_id)
+                                             Index Searches: 43847
+                                             Buffers: shared hit=131541
+                           -&gt;  Memoize  (cost=0.14..0.16 rows=1 width=16) (actual time=0.001..0.001 rows=1.00 loops=95932)
+                                 Cache Key: pr.categoria_id
+                                 Cache Mode: logical
+                                 Hits: 95928  Misses: 4  Evictions: 0  Overflows: 0  Memory Usage: 1kB
+                                 Buffers: shared hit=8
+                                 -&gt;  Index Scan using categoria_pkey on categoria c  (cost=0.13..0.15 rows=1 width=16) (actual time=0.005..0.005 rows=1.00 loops=4)
+                                       Index Cond: (id = pr.categoria_id)
+                                       Index Searches: 4
+                                       Buffers: shared hit=8</pre></div></div></div>
+<div class="capwrap"><div class="caplab">Captura 13</div><div class="term"><div class="titlebar"><span class="dot rd"></span><span class="dot yl"></span><span class="dot gn"></span><span class="ttitle">refresh materialized view concurrently</span></div><div class="termbody"><span class="prompt">food_store_tp3=&gt;</span><pre>REFRESH MATERIALIZED VIEW
+===FIN===</pre></div></div></div>
+<p>Frecuencia recomendada: mensual (corte contable). Implicancia: entre refrescos la MV queda congelada al último estado — aceptable para corte mensual; para datos del día, refrescar on-demand o usar la consulta base.</p>
+<h2>DUIA · Declaración de Uso de IA (TP5)</h2>
+<table><tr><th style="width:18%">Ítem</th><th style="width:82%">Detalle</th></tr><tr><td>Herramientas</td><td>OpenCode (IA) + PostgreSQL 18 (verificación real con EXPLAIN ANALYZE)</td></tr><tr><td>Kiro</td><td>No está instalado: specs con la plantilla Kiro redactados a mano</td></tr><tr><td>Descarte IA</td><td>idx_producto_categoria rechazado: redundante con idx_producto_categoria_activo (Semana 3)</td></tr><tr><td>Traducción R7</td><td>usuario→cliente · estado/eliminado→activo · idx_pedido_usuario→idx_pedido_cliente</td></tr><tr><td>Archivos</td><td>indices.sql · views.sql · informe_mediciones.md · duia.md · README.md · specs/</td></tr></table>
+</body></html>

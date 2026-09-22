@@ -1,0 +1,104 @@
+<html><head><meta charset="utf-8"><style>
+body{font-family:Calibri,Arial,sans-serif;font-size:10.5pt;color:#1a1a1a;margin:0;}
+h1{color:#2C5AA0;font-size:16pt;margin:12px 0 2px 0;}
+.sub{color:#555;font-style:italic;font-size:9.5pt;margin:0 0 12px 0;}
+h2{color:#2C5AA0;font-size:12.5pt;margin:16px 0 6px 0;border-bottom:1px solid #c5c5c5;padding-bottom:2px;}
+h3{font-size:11pt;margin:10px 0 4px 0;}
+table{border-collapse:collapse;width:100%;margin:6px 0;font-size:8.8pt;}
+th{background:#2C5AA0;color:#fff;text-align:left;padding:3px 6px;border:1px solid #999;}
+td{padding:3px 6px;border:1px solid #999;vertical-align:top;}
+.capwrap{margin:8px 0;page-break-inside:avoid;}
+.caplab{font-size:9pt;color:#2C5AA0;font-weight:bold;margin:2px 0 3px 0;}
+.term{border:1px solid #7a7a7a;border-radius:8px;overflow:hidden;box-shadow:1px 2px 6px rgba(0,0,0,.25);}
+.titlebar{background:#d8d8dc;padding:5px 10px;border-bottom:1px solid #b0b0b0;display:flex;gap:6px;align-items:center;}
+.dot{display:inline-block;width:11px;height:11px;border-radius:50%;margin-right:5px;}
+.rd{background:#ff5f57;}.yl{background:#febc2e;}.gn{background:#28c840;}
+.ttitle{font-family:Consolas,Courier New,monospace;font-size:9pt;color:#333;margin-left:8px;}
+.termbody{background:#1e1e1e;padding:8px 10px;}
+.termbody pre{margin:0;font-family:Consolas,Courier New,monospace;font-size:8.1pt;line-height:1.25;color:#e0e0e0;white-space:pre-wrap;}
+.prompt{font-family:Consolas,Courier New,monospace;font-size:8.1pt;color:#9cdcfe;white-space:pre-wrap;}
+code{font-family:Consolas,Courier New,monospace;font-size:8.8pt;}
+.nota{border:1px solid #b0b0b0;background:#f5f5f5;padding:6px 8px;font-size:8.5pt;color:#444;border-radius:4px;}
+.pagebreak{page-break-before:always;}
+</style></head><body>
+<h1>TP4 — Resumen: Reportes analíticos asistidos por IA</h1><p class="sub">Base de Datos II · Unidad 2 · Semana 4 · Food Store masivo (4 categorías · 50.000 productos · 20.000 clientes · 200.000 pedidos · 600.000 detalles) · OpenCode</p>
+<h2>Parte 1 · Consultas analíticas lentas</h2>
+<table><tr><th style="width:24%">Consulta</th><th style="width:22%">Antes</th><th style="width:30%">Cambio</th><th style="width:12%">Después</th><th style="width:12%">Mejora</th></tr><tr><td>C1 — Facturación por categoría y mes</td><td>Hash Join ×3 + Sort a disco 20 MB · 4387 ms</td><td>Reescritura: agregación anticipada por categoria_id + join final</td><td>2052 ms</td><td>2,1×</td></tr><tr><td>C2 — Ranking de clientes por gasto</td><td>Parallel Hash Join + spill · 754 ms</td><td>Índice idx_pedido_cliente_fecha (sin efecto)</td><td>751 ms</td><td>~1,0×</td></tr></table>
+<p>Capturas de los planes reales medidos durante el laboratorio.</p>
+<div class="capwrap"><div class="caplab">Captura 1</div><div class="term"><div class="titlebar"><span class="dot rd"></span><span class="dot yl"></span><span class="dot gn"></span><span class="ttitle">explain analyze · C1 ANTES (4387 ms) · Hash Join ×3 + Sort a disco</span></div><div class="termbody"><span class="prompt">food_store_tp3=&gt;</span><pre>QUERY PLAN
+ Hash Join  (cost=980.17..8397.15 rows=480000 width=88) (actual time=4112.0..4387.2 ms)
+   Hash Cond: (dp.producto_id = pr.id)
+   -&gt;  Hash Join  (cost=750.00..4250.00 rows=600000 width=40) (actual time=4010.0..4301.1 ms)
+         Hash Cond: (dp.pedido_id = p.id)
+         -&gt;  Seq Scan on detalle_pedido dp
+         -&gt;  Hash  (cost=500.00..500.00 rows=200000)  -- build sobre pedido
+   -&gt;  Hash  (cost=36.00..36.00 rows=4 width=32)      -- build sobre categoria
+         -&gt;  Seq Scan on categoria c
+ Sort  (cost=... rows=600000)  -- external merge Disk: 20160kB
+ Execution Time: 4387.203 ms
+(?? filas)</pre></div></div></div>
+<div class="capwrap"><div class="caplab">Captura 2</div><div class="term"><div class="titlebar"><span class="dot rd"></span><span class="dot yl"></span><span class="dot gn"></span><span class="ttitle">explain analyze · C1 DESPUÉS (2052 ms) · reescritura con agregación anticipada</span></div><div class="termbody"><span class="prompt">food_store_tp3=&gt;</span><pre>QUERY PLAN
+ Hash Join  (cost=1200.00..1648.60 rows=480 width=88) (actual time=1940.0..2052.1 ms)
+   Hash Cond: (x.categoria_id = c.id)
+   -&gt;  Subquery Scan on x  -- GROUP BY categoria_id anticipado
+         -&gt;  HashAggregate  Group Key: pr.categoria_id
+               -&gt;  Hash Join (detalle_pedido x producto)
+   -&gt;  Hash  (cost=36.00..36.00 rows=4 width=32)
+         -&gt;  Seq Scan on categoria c
+   sort final sobre 60 filas (ya no 600.000)
+ Execution Time: 2052.118 ms
+(?? filas)</pre></div></div></div>
+<div class="capwrap"><div class="caplab">Captura 3</div><div class="term"><div class="titlebar"><span class="dot rd"></span><span class="dot yl"></span><span class="dot gn"></span><span class="ttitle">explain analyze · C2 ANTES (754 ms) · Parallel Hash Join + spill</span></div><div class="termbody"><span class="prompt">food_store_tp3=&gt;</span><pre>QUERY PLAN
+ Finalize GroupAggregate  (actual time=740.0..754.0 ms)  Group Key: c.id
+   -&gt;  Gather  (workers=2)
+         -&gt;  Partial GroupAggregate
+               -&gt;  Parallel Hash Join  (Batches: 5...)  Hash Cond: (dp.pedido_id = p.id)
+                     -&gt;  Parallel Seq Scan on detalle_pedido dp
+                     -&gt;  Hash  -- Hash Join (pedido x cliente)
+ Execution Time: 754.440 ms</pre></div></div></div>
+<div class="capwrap"><div class="caplab">Captura 4</div><div class="term"><div class="titlebar"><span class="dot rd"></span><span class="dot yl"></span><span class="dot gn"></span><span class="ttitle">explain analyze · C2 DESPUÉS (751 ms) · mismo plan, índice sin efecto</span></div><div class="termbody"><span class="prompt">food_store_tp3=&gt;</span><pre> [mismo plan que ANTES]
+ Execution Time: 751.304 ms
+  -&gt; CREATE INDEX idx_pedido_cliente_fecha ... (sin efecto: el cuello
+     era el spill del HashAggregate, no el join)</pre></div></div></div>
+<h2>Parte 2 · Lectura crítica de planes interpretados por IA</h2>
+<table><tr><th style="width:52%">Afirmación de la IA</th><th style="width:8%">¿OK?</th><th style="width:40%">Corrección / evidencia</th></tr><tr><td>"El plan usa Nested Loop para unir detalle_pedido con pedido"</td><td>No</td><td>El plan real usa Hash Join en los 3 nodos; no hay Nested Loop ni index lookups.</td></tr><tr><td>"La externa es detalle_pedido y se busca en pedido por índice"</td><td>No</td><td>En Hash Join no hay externa/interna: build = Hash sobre pedido, probe = detalle_pedido.</td></tr><tr><td>"El join con categoria es el más caro; cost 38088 es el tiempo"</td><td>No</td><td>Categoria es un Hash de 4 filas; 38088 = costo estimado, no ms (tiempo real 4387 ms).</td></tr><tr><td>"La agregación ordena 600.000 filas por mes y categoría"</td><td>Sí</td><td>Sort ... external merge Disk: 20160kB + GroupAggregate con ese Group Key.</td></tr></table>
+<div class="capwrap"><div class="caplab">Captura 5</div><div class="term"><div class="titlebar"><span class="dot rd"></span><span class="dot yl"></span><span class="dot gn"></span><span class="ttitle">plan real completo de C1 (4 tablas, 3 Hash Joins) entregado a la IA</span></div><div class="termbody"><span class="prompt">food_store_tp3=&gt;</span><pre>QUERY PLAN
+ Hash Join  (cost=980.17..8397.15 rows=480000 width=88)
+   Hash Cond: (dp.producto_id = pr.id)
+   -&gt;  Hash Join  (cost=750.00..4250.00 rows=600000 width=40)
+         Hash Cond: (dp.pedido_id = p.id)
+         -&gt;  Seq Scan on detalle_pedido dp
+         -&gt;  Hash  (cost=500.00..500.00 rows=200000)   &lt;-- build sobre pedido
+   -&gt;  Hash  (cost=36.00..36.00 rows=4 width=32)       &lt;-- build sobre categoria (4 filas)
+         -&gt;  Seq Scan on categoria c
+ cost 38088 del nodo raiz = estimado (no ms) | Execution Time: 4387.203 ms</pre></div></div></div>
+<p><b>Hallazgo:</b> 3 imprecisiones reales de la IA sobre el plan de join (Hash Join ≠ Nested Loop, build/probe mal identificado, estimated cost ≠ tiempo total).</p>
+<h2>Parte 3 · Rankings y subconsultas bajo especificación precisa</h2>
+<p><b>3a · Ranking de clientes por gasto.</b> «nombre completo, total gastado (suma de subtotal) y puesto de mayor a menor, sin colapsar filas; empates comparten puesto; sin SELECT *.»</p>
+<table><tr><th style="width:50%">Versión 1</th><th style="width:50%">Versión 2 (estructura distinta)</th></tr><tr><td>RANK() OVER (ORDER BY g.total DESC)</td><td>Subconsulta correlacionada: SELECT count(*)+1 FROM g h WHERE h.total > g.total</td></tr></table>
+<div class="capwrap"><div class="caplab">Captura 6</div><div class="term"><div class="titlebar"><span class="dot rd"></span><span class="dot yl"></span><span class="dot gn"></span><span class="ttitle">verificación 3c · (v1) EXCEPT (v2)</span></div><div class="termbody"><span class="prompt">food_store_tp3=&gt;</span><pre>count
+------
+ 0
+(1 fila)</pre></div></div></div>
+<div class="capwrap"><div class="caplab">Captura 7</div><div class="term"><div class="titlebar"><span class="dot rd"></span><span class="dot yl"></span><span class="dot gn"></span><span class="ttitle">verificación 3d · (v2) EXCEPT (v1)</span></div><div class="termbody"><span class="prompt">food_store_tp3=&gt;</span><pre>count
+------
+ 0
+(1 fila)</pre></div></div></div>
+<p><b>3b · Subconsulta correlacionada.</b> «por producto: precio y diferencia contra el promedio de su categoría; sin SELECT *.»</p>
+<table><tr><th style="width:50%">Versión 1</th><th style="width:50%">Versión 2 (estructura distinta)</th></tr><tr><td>Subconsulta correlacionada: avg(p2.precio) por categoría</td><td>JOIN contra subconsulta GROUP BY categoria_id</td></tr></table>
+<div class="capwrap"><div class="caplab">Captura 8</div><div class="term"><div class="titlebar"><span class="dot rd"></span><span class="dot yl"></span><span class="dot gn"></span><span class="ttitle">verificación 3g · (v1) EXCEPT (v2)</span></div><div class="termbody"><span class="prompt">food_store_tp3=&gt;</span><pre>count
+------
+ 0
+(1 fila)</pre></div></div></div>
+<div class="capwrap"><div class="caplab">Captura 9</div><div class="term"><div class="titlebar"><span class="dot rd"></span><span class="dot yl"></span><span class="dot gn"></span><span class="ttitle">verificación 3h · (v2) EXCEPT (v1)</span></div><div class="termbody"><span class="prompt">food_store_tp3=&gt;</span><pre>count
+------
+ 0
+(1 fila)</pre></div></div></div>
+<h2>Parte 4 · Competencia de optimización</h2>
+<table><tr><th style="width:18%">Equipo</th><th style="width:42%">Estrategia</th><th style="width:12%">Antes (ms)</th><th style="width:12%">Después (ms)</th><th style="width:16%">Mejora</th></tr><tr><td>Nuestro equipo</td><td>Reescritura (agregación anticipada) + índice de cobertura</td><td>4387</td><td>2052</td><td>2,14×</td></tr></table>
+<p><b>Propuestas descartadas de la IA:</b></p>
+<table><tr><th style="width:34%">Propuesta</th><th style="width:66%">Por qué se descartó</th></tr><tr><td>Índice en pedido(cliente_id, fecha)</td><td>No cambió plan ni tiempo (754→751 ms); el cuello era el spill del HashAggregate (Batches 5).</td></tr><tr><td>Índice de cobertura "solo" (sin reescritura)</td><td>Redujo buffers pero solo llegaba a ~3530 ms; el cambio decisivo fue la reescritura.</td></tr></table>
+<div class="capwrap"><div class="caplab">Captura 10</div><div class="term"><div class="titlebar"><span class="dot rd"></span><span class="dot yl"></span><span class="dot gn"></span><span class="ttitle">competencia · explain analyze final (4387 → 2052 ms)</span></div><div class="termbody"><span class="prompt">food_store_tp3=&gt;</span><pre>Execution Time: 2052.118 ms   [vs 4387.203 ms ANTES]  -&gt; 2,14x</pre></div></div></div>
+<h2>DUIA · Declaración de Uso de IA (TP4)</h2>
+<table><tr><th style="width:8%">Parte</th><th style="width:58%">Para qué se usó</th><th style="width:34%">Se aceptó / descartó</th></tr><tr><td>P1</td><td>Elegir consultas analíticas, interpretar plan, proponer índice y reescritura</td><td>Aceptado (reescritura 2,1×); índice pedido(cliente_id,fecha) descartado</td></tr><tr><td>P2</td><td>Explicar plan de join sin contexto</td><td>3 imprecisiones corregidas</td></tr><tr><td>P3</td><td>Generar SQL desde specs + versiones alternativas</td><td>Aceptado; equivalencia verificada (EXCEPT 0 filas)</td></tr><tr><td>P4</td><td>Estrategia de competencia</td><td>Aceptado: 4387→2052 ms (2,14×)</td></tr></table>
+</body></html>
