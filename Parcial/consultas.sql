@@ -68,15 +68,19 @@ GROUP BY p.forma_pago;
 -- ------------------------------------------------------------
 
 -- 6. Producto con precio por encima del promedio de su categoria
---    (subconsulta correlacionada)
+--    (subconsulta correlacionada). El outer se acota a 5 filas:
+--    ORDER BY sobre la columna calculada fuerza evaluar la subconsulta
+--    por cada fila del outer (50.000 filas = plan de costo ~22M).
 SELECT pr.nombre, pr.precio,
        pr.precio - (SELECT avg(p2.precio)
                     FROM producto p2
                     WHERE p2.categoria_id = pr.categoria_id) AS dif_vs_promedio
-FROM producto pr
-WHERE pr.activo
-ORDER BY dif_vs_promedio DESC
-LIMIT 10;
+FROM (SELECT id, nombre, precio, categoria_id
+      FROM producto
+      WHERE activo
+      ORDER BY precio DESC
+      LIMIT 5) pr
+ORDER BY dif_vs_promedio DESC;
 
 -- 7. Subconsulta en FROM: total por cliente sobre bases agregadas
 SELECT cl.nombre || ' ' || cl.apellido AS cliente, g.total

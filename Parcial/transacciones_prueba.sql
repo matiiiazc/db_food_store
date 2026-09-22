@@ -1,7 +1,10 @@
 -- ============================================================
 -- TPI Food Store - Objetivo 8: transacciones y concurrencia
 -- Escenarios A/B para dos consolas psql (Sesion A y Sesion B).
--- Todo termina en ROLLBACK: el esquema y los datos quedan intactos.
+-- Los escenarios 1 y 1b cierran la sesion B con COMMIT (necesario para
+-- que A observe el cambio): eso MODIFICA el stock del Producto 1.
+-- Al final del script hay una linea de restauracion (stock original).
+-- Todo lo demas termina en ROLLBACK y deja el esquema intacto.
 -- Ejecutar primero en orden: linea por linea.
 -- ============================================================
 
@@ -74,3 +77,10 @@ BEGIN;
 DELETE FROM producto WHERE id = 1;   -- ERROR: no esta permitido
 -- la transaccion aborto completa (ninguna instruccion se aplico)
 ROLLBACK;
+
+-- ------------------------------------------------------------
+-- RESTAURACION: devuelve al Producto 1 su stock original
+-- Los escenarios 1 y 1b commitean +500 y +500 en la sesion B.
+-- Ejecutar en la Sesion B (o en una consola libre) al terminar.
+-- ------------------------------------------------------------
+UPDATE producto SET stock = stock - 1000 WHERE nombre = 'Producto 1';

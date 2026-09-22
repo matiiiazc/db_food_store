@@ -32,6 +32,8 @@ Resumen de lo actuado en las **Unidades 1, 2 y 3**, cómo se probó cada cosa, q
 
 **Cómo se probó:** antes/después sobre la base masiva (50.000 productos, 200.000 pedidos, 600.000 líneas), verificando cambio de plan y tiempos.
 
+**Ajuste detectado en la revisión final:** la consulta 6 (subconsulta correlacionada del objetivo 5) ordenaba por la columna calculada, obligando a PostgreSQL a re-evaluar la subconsulta para las 50.000 filas (plan de costo ~22M, se colgaba). Se acotó el outer a top 5 por precio: idéntica técnica, ahora ejecuta en ~53 ms (verificado con `EXPLAIN (ANALYZE, BUFFERS)`).
+
 **Resultados (antes → después):**
 | Consulta | Antes | Después | Ganancia |
 |---|---|---|---|
