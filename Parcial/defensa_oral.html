@@ -1,0 +1,35 @@
+<html><head><meta charset="utf-8"><style>
+body{font-family:Calibri,Arial,sans-serif;font-size:10pt;color:#1a1a1a;margin:0;}
+h1{color:#2C5AA0;font-size:15pt;margin:12px 0 2px 0;}
+.sub{color:#555;font-style:italic;font-size:9pt;margin:0 0 12px 0;}
+h2{color:#2C5AA0;font-size:12pt;margin:16px 0 6px 0;border-bottom:1px solid #c5c5c5;padding-bottom:2px;}
+h3{font-size:10.5pt;margin:10px 0 4px 0;}
+p{margin:4px 0;}
+ul{margin:4px 0 4px 18px;padding:0;}
+li{margin:2px 0;}
+table{border-collapse:collapse;width:100%;margin:6px 0;font-size:8.5pt;}
+th{background:#2C5AA0;color:#fff;text-align:left;padding:3px 6px;border:1px solid #999;}
+td{padding:3px 6px;border:1px solid #999;vertical-align:top;}
+code{font-family:Consolas,Courier New,monospace;font-size:8.4pt;}
+.term{border:1px solid #7a7a7a;border-radius:8px;overflow:hidden;box-shadow:1px 2px 6px rgba(0,0,0,.25);margin:8px 0;page-break-inside:avoid;}
+.titlebar{background:#d8d8dc;padding:5px 10px;border-bottom:1px solid #b0b0b0;}
+.dot{display:inline-block;width:11px;height:11px;border-radius:50%;margin-right:5px;}
+.rd{background:#ff5f57;}.yl{background:#febc2e;}.gn{background:#28c840;}
+.ttitle{font-family:Consolas,Courier New,monospace;font-size:8.5pt;color:#333;margin-left:8px;}
+.termbody{background:#1e1e1e;padding:8px 10px;}
+.termbody pre{margin:0;font-family:Consolas,Courier New,monospace;font-size:7.8pt;line-height:1.25;color:#e0e0e0;white-space:pre-wrap;}
+.nota{border:1px solid #b0b0b0;background:#f5f5f5;padding:6px 8px;font-size:8.5pt;color:#444;border-radius:4px;margin:8px 0;}
+.pagebreak{page-break-before:always;}
+.titulopag{color:#2C5AA0;font-size:11pt;font-weight:bold;margin:10px 0 4px 0;}
+</style></head><body><h1>Defensa oral — TPI Food Store (primera entrega)</h1><p class="sub">Guía de 1 hoja · elevator pitch + preguntas típicas + números medidos</p><p><b>Elevator pitch (30 s):</b> «Food Store es un sistema de gestión de pedidos para un negocio de comidas. Lo modelamos desde el enunciado (5 entidades, 1 relación N:M), lo normalizamos hasta BCNF, lo cargamos con datos masivos (200.000 pedidos, 600.000 líneas) y probamos integridad, concurrencia y optimización contra PostgreSQL 18. La IA generó, pero todo se verificó en el motor: medimos antes/después y descartamos lo que no mejoraba.»</p>
+<div class="titulopag">Preguntas típicas</div>
+<h2>Modelo de datos (objs 1-4)</h2>
+<ul><li><b>¿Por qué pedido–producto es N:M?</b> Un pedido lleva varios productos y un producto se vende en muchos pedidos; se resuelve con detalle_pedido (cantidad, precio_unitario, subtotal — precio congelado, R4).</li><li><b>¿Por qué FK producto→categoría es NOT NULL?</b> Participación total (R1); categoría es parcial (puede existir vacía).</li><li><b>¿En qué forma normal está?</b> BCNF: de la planilla separamos fecha/cliente/forma_pago y categoria; cada determinante restante es clave candidata.</li></ul>
+<h2>Integridad y transacciones (objs 7-8)</h2>
+<ul><li><b>¿Cómo implementás el borrado lógico?</b> Columna activo + trigger BEFORE DELETE que lanza excepción; baja solo con UPDATE activo=FALSE. Catálogo 50.000→49.999, histórico intacto.</li><li><b>¿Qué anomalías reproduciste?</b> Lectura no repetible (10→50 READ COMMITTED, estable con REPEATABLE READ) y fantasma (estable con SERIALIZABLE). FOR UPDATE: B bloqueada ~3,4 s.</li></ul>
+<h2>Optimización (objs 5-6)</h2>
+<ul><li><b>¿Qué optimizaste?</b> C1: 4387→2052 ms (2,1×); vistas equivalentes (EXCEPT=0). Índices: catálogo 20→8,4 ms; cliente ~18×; pedidos 78,4→6,8 ms; MV 2447→15 ms.</li><li><b>¿Por qué descartaste un índice de la IA?</b> idx_producto_categoria era redundante con idx_producto_categoria_activo (mayor costo de escritura sin cambiar el plan).</li><li><b>¿Qué es la MV?</b> Precalcula facturación por categoría/mes; se refresca con REFRESH CONCURRENTLY (mensual); entre refrescos queda congelada.</li></ul>
+<h2>IA (DUIA)</h2>
+<ul><li><b>¿Qué rol tuvo?</b> Generó SQL/specs/interpretación de planes. <b>¿Qué descartaste?</b> índices redundantes y una reescritura sin impacto.</li><li><b>¿Imprecisiones?</b> 3 al leer un plan (Hash Join ≠ Nested Loop; build/probe; cost estimado ≠ tiempo) corregidas con el motor.</li></ul>
+<div class="titulopag">Tabla de números para citar</div>
+<table><tr><th style="width:45%">Métrica</th><th style="width:55%">Valor</th></tr><tr><td>Base de datos</td><td>50.000 productos · 200.000 pedidos · 600.000 líneas</td></tr><tr><td>C1 facturación (TP4)</td><td>4387 → 2052 ms (2,1×)</td></tr><tr><td>C2 ranking (TP4)</td><td>754 → 751 ms (sin mejora, índice descartado)</td></tr><tr><td>Índice catálogo por nombre</td><td>20 → 8,4 ms (Seq→Bitmap parcial WHERE activo)</td></tr><tr><td>Índice cliente por apellido</td><td>15,9 → 0,9 ms (~18×)</td></tr><tr><td>Pedidos tarjeta por mes</td><td>78,4 → 6,8 ms</td></tr><tr><td>Vista materializada</td><td>2447 → ~15 ms (~163×)</td></tr><tr><td>Costo escritura (300 INSERT)</td><td>47,5 → 151,6 ms (+3,2×, aceptado)</td></tr><tr><td>Concurrencia</td><td>B bloqueada ~3,4 s en FOR UPDATE</td></tr><tr><td>Equivalencias SQL</td><td>EXCEPT = 0 filas (RANK vs correlacionada; correlacionada vs GROUP BY)</td></tr></table></body></html>

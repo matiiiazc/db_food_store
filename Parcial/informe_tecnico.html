@@ -1,0 +1,74 @@
+<html><head><meta charset="utf-8"><style>
+body{font-family:Calibri,Arial,sans-serif;font-size:10pt;color:#1a1a1a;margin:0;}
+h1{color:#2C5AA0;font-size:15pt;margin:12px 0 2px 0;}
+.sub{color:#555;font-style:italic;font-size:9pt;margin:0 0 12px 0;}
+h2{color:#2C5AA0;font-size:12pt;margin:16px 0 6px 0;border-bottom:1px solid #c5c5c5;padding-bottom:2px;}
+h3{font-size:10.5pt;margin:10px 0 4px 0;}
+p{margin:4px 0;}
+ul{margin:4px 0 4px 18px;padding:0;}
+li{margin:2px 0;}
+table{border-collapse:collapse;width:100%;margin:6px 0;font-size:8.5pt;}
+th{background:#2C5AA0;color:#fff;text-align:left;padding:3px 6px;border:1px solid #999;}
+td{padding:3px 6px;border:1px solid #999;vertical-align:top;}
+code{font-family:Consolas,Courier New,monospace;font-size:8.4pt;}
+.term{border:1px solid #7a7a7a;border-radius:8px;overflow:hidden;box-shadow:1px 2px 6px rgba(0,0,0,.25);margin:8px 0;page-break-inside:avoid;}
+.titlebar{background:#d8d8dc;padding:5px 10px;border-bottom:1px solid #b0b0b0;}
+.dot{display:inline-block;width:11px;height:11px;border-radius:50%;margin-right:5px;}
+.rd{background:#ff5f57;}.yl{background:#febc2e;}.gn{background:#28c840;}
+.ttitle{font-family:Consolas,Courier New,monospace;font-size:8.5pt;color:#333;margin-left:8px;}
+.termbody{background:#1e1e1e;padding:8px 10px;}
+.termbody pre{margin:0;font-family:Consolas,Courier New,monospace;font-size:7.8pt;line-height:1.25;color:#e0e0e0;white-space:pre-wrap;}
+.nota{border:1px solid #b0b0b0;background:#f5f5f5;padding:6px 8px;font-size:8.5pt;color:#444;border-radius:4px;margin:8px 0;}
+.pagebreak{page-break-before:always;}
+.titulopag{color:#2C5AA0;font-size:11pt;font-weight:bold;margin:10px 0 4px 0;}
+</style></head><body><h1>Informe técnico — Primera entrega TPI Food Store</h1><p class="sub">Resumen de lo actuado en Unidades 1, 2 y 3 · verificación en PostgreSQL 18 · IA: OpenCode (+Kiro no disponible)</p><h2>Unidad 1 — Modelo de datos e integridad</h2>
+<ul><li><b>ER</b> completo del dominio Food Store desde el enunciado (5 entidades) con reglas R1–R7 → <code>01_mer_relacional.md</code>.</li><li><b>Paso a relacional</b>: 1:N por FK, N:M por entidad asociativa (clave sustituta + UNIQUE) → <code>01_mer_relacional.md</code>.</li><li><b>Normalización</b> de la planilla real hasta 3FN/BCNF con dependencias funcionales explícitas → <code>02_normalizacion.md</code>.</li><li><b>DDL</b> en <code>schema.sql</code>/<code>ddl.sql</code>: ENUM, IDENTITY, PK/FK con ON DELETE RESTRICT, CHECK, UNIQUE, índices, TIMESTAMPTZ, NUMERIC.</li></ul>
+<b>Cómo se probó:</b> schema.sql ejecutado de punta a punta sin errores sobre PostgreSQL 18.
+<div class="term"><div class="titlebar"><span class="dot rd"></span><span class="dot yl"></span><span class="dot gn"></span><span class="ttitle">food_store_tp3=&gt; \i ddl.sql</span></div><div class="termbody"><pre>CREATE TYPE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+(5 tablas creadas sin errores)</pre></div></div>
+<div class="pagebreak"></div>
+<h2>Unidad 1/2 — Integridad, transacciones y concurrencia</h2>
+<ul><li>Triggers/funciones plpgsql: baja lógica anti-DELETE, descuento de stock, validación de subtotal → <code>triggers_restricciones.sql</code>.</li><li>Laboratorio con 2 sesiones: lectura no repetible, lectura fantasma, bloqueo FOR UPDATE, deadlock → <code>04_transacciones.md</code>.</li></ul>
+Salida real del laboratorio de aislamiento:
+<div class="term"><div class="titlebar"><span class="dot rd"></span><span class="dot yl"></span><span class="dot gn"></span><span class="ttitle">food_store_tp3=&gt; (sesion A)</span></div><div class="termbody"><pre>BEGIN;
+SET TRANSACTION ISOLATION LEVEL READ COMMITTED;
+SELECT stock FROM producto WHERE nombre=&#x27;Producto 1&#x27;;
+ stock
+-------
+    10
+
+-- B: UPDATE stock=50; COMMIT
+
+SELECT stock FROM producto WHERE nombre=&#x27;Producto 1&#x27;;
+ stock
+-------
+    50      &lt;-- lectura no repetible (B commiteo en el medio)
+ROLLBACK;</pre></div></div>
+<b>Resultado:</b> la sesión B de <code>FOR UPDATE</code> quedó bloqueada <b>~3,4 s</b> hasta el ROLLBACK de A. Todo cerrado con ROLLBACK (esquema intacto, protocolo de la cátedra).
+<div class="pagebreak"></div>
+<h2>Unidad 2 — Optimización de consultas</h2>
+<b>Qué se implementó:</b> consultas de reporting reales (4 tablas), medición con EXPLAIN ANALYZE, reescritura con agregación anticipada e índice de cobertura; se descartaron propuestas que no mejoraban → <code>consultas.sql</code>, TP3/TP4.
+<table><tr><th style="width:38%">Consulta</th><th style="width:22%">Antes</th><th style="width:20%">Después</th><th style="width:20%">Ganancia</th></tr><tr><td>C1 facturación por categoría/mes</td><td>4387 ms</td><td>2052 ms</td><td>2,1×</td></tr><tr><td>C2 ranking de clientes por gasto</td><td>754 ms</td><td>751 ms</td><td>sin mejora (índice descartado)</td></tr></table>
+<b>Equivalencias SQL verificadas con EXCEPT = 0 filas</b> (RANK vs. subconsulta correlacionada; correlacionada vs. GROUP BY).
+<div class="pagebreak"></div>
+<h2>Unidad 3 — Índices, vistas y objetos programables</h2>
+<b>Qué se implementó:</b> 3 índices justificados con medición antes/después, 1 propuesta de IA descartada por sobreindexación, 3 vistas, 3 funciones plpgsql y procedimiento <code>sp_registrar_pedido</code> invocado con CALL; vista materializada de facturación con índice único y REFRESH CONCURRENTLY.
+<table><tr><th style="width:38%">Objeto</th><th style="width:16%">Antes</th><th style="width:20%">Después</th><th style="width:26%">Ganancia</th></tr><tr><td>Búsqueda catálogo por nombre</td><td>Seq 20 ms</td><td>Bitmap 8,4 ms</td><td>Seq→Bitmap</td></tr><tr><td>Cliente por apellido</td><td>Seq 15,9 ms</td><td>Index 0,9 ms</td><td>~18×</td></tr><tr><td>Pedidos tarjeta por mes</td><td>78,4 ms</td><td>6,8 ms</td><td>sin remoción de filas</td></tr><tr><td>MV facturación c/mes</td><td>2447 ms</td><td>~15 ms</td><td>~163×</td></tr></table>
+<b>Costo de escritura:</b> 300 INSERT → 47,5 ms (sin índices nuevos) vs 151,6 ms (+3,2×, aceptado).
+<div class="term"><div class="titlebar"><span class="dot rd"></span><span class="dot yl"></span><span class="dot gn"></span><span class="ttitle">food_store_tp3=&gt; CALL sp_registrar_pedido(1, ..., ARRAY[1,2], ARRAY[1,1]);</span></div><div class="termbody"><pre>CALL
+time: 22 ms  -- inserto pedido + 2 detalle, trigger descontó stock
+NOTICE: Pedido 200601 registrado para el cliente 1
+-- (en BEGIN...ROLLBACK: se revirtió al final de la demo)</pre></div></div>
+<h2>Uso de IA</h2>
+<ul><li>Herramientas: <b>OpenCode</b> (IA primaria) y Kiro (requerido, <b>no instalado</b>: specs con plantilla Kiro a mano, constado en DUIA).</li><li>SQL de consultas/vistas/índices/triggers/procedimientos → aceptado tras verificación en motor.</li><li>Lectura de plan (TP4 P2): la IA cometió <b>3 imprecisiones</b> corregidas con el plan real.</li><li>Índice <code>idx_producto_categoria</code> → <b>descartado</b> (redundante).</li><li>Índice <code>pedido(cliente_id, fecha)</code> → <b>descartado</b> (sin cambio de plan en la competencia).</li></ul>
+<div class="nota">Evidencia completa: carpeta <code>Parcial/</code> + <code>checklist_tpi.md</code> (mapa objetivo → archivo). Reportes TP3/TP4/TP5 en sus carpetas.</div></body></html>
