@@ -1,0 +1,25 @@
+﻿Fragmento del log de auditoria — U5, Parte B
+Fuente: C:/Program Files/PostgreSQL/18/data/log/postgresql-2026-10-06_114319.log
+Configuración aplicada: log_connections=on, log_disconnections=on, log_statement=mod
+================================================================================
+
+2026-10-06 18:57:06 -03 LOG:  conexión recibida: host=127.0.0.1 port=61701
+2026-10-06 18:57:06 -03 LOG:  conexión autenticada: identidad="app_web" método=scram-sha-256 (C:/Program Files/PostgreSQL/18/data/pg_hba.conf:115)
+2026-10-06 18:57:06 -03 LOG:  conexión autorizada: usuario=app_web base_de_datos=food_store_tp3 nombre_de_aplicación=psql
+2026-10-06 18:57:06 -03 LOG:  sentencia: INSERT INTO pedido (fecha, forma_pago, cliente_id)
+	VALUES (now(), 'TARJETA', 77);
+2026-10-06 18:57:06 -03 LOG:  sentencia: UPDATE producto SET stock = stock - 1 WHERE id = 1;
+2026-10-06 18:57:06 -03 LOG:  sentencia: UPDATE usuario SET activo = TRUE WHERE id = 107;
+2026-10-06 18:57:06 -03 ERROR:  permiso denegado a la tabla usuario
+2026-10-06 18:57:06 -03 SENTENCIA:  UPDATE usuario SET activo = TRUE WHERE id = 107;
+2026-10-06 18:57:06 -03 LOG:  desconexión: duración de sesión: 0:00:00.199 usuario=app_web base=food_store_tp3 host=127.0.0.1 port=61701
+
+2026-10-06 18:57:06 -03 LOG:  conexión recibida: host=127.0.0.1 port=61702
+2026-10-06 18:57:06 -03 LOG:  conexión autenticada: identidad="admin_datos" método=scram-sha-256 (C:/Program Files/PostgreSQL/18/data/pg_hba.conf:115)
+2026-10-06 18:57:06 -03 LOG:  conexión autorizada: usuario=admin_datos base_de_datos=food_store_tp3 nombre_de_aplicación=psql
+2026-10-06 18:57:06 -03 LOG:  sentencia: UPDATE usuario SET activo = TRUE WHERE id = 107;
+2026-10-06 18:57:06 -03 LOG:  desconexión: duración de sesión: 0:00:00.036 usuario=admin_datos base=food_store_tp3 host=127.0.0.1 port=61702
+
+2026-10-06 18:57:12 -03 LOG:  conexión recibida: host=127.0.0.1 port=61717
+2026-10-06 18:57:12 -03 FATAL:  la autentificación password falló para el usuario "app_web"
+2026-10-06 18:57:12 -03 DETALLE:  La conexión coincidió con el archivo "C:/Program Files/PostgreSQL/18/data/pg_hba.conf" línea 115: "host all all 127.0.0.1/32 scram-sha-256"
