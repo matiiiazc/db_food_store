@@ -1,0 +1,12 @@
+# BITACORA.md — Uso de IA (TP Unidad 5)
+
+Trabajo resuelto con OpenCode (asistente de terminal), especificación con
+plantilla de Kiro (Kiro no está instalado: specs redactadas a mano con su
+plantilla, como en trabajos anteriores) y Git para versionado por partes.
+
+| Parte | Prompt enviado a la IA | Respuesta relevante (resumen) | Validación o corrección humana |
+|---|---|---|---|
+| A | "Diseñá los roles de Food Store aplicando mínimo privilegio: 4 roles de grupo (lectura, escritura, soporte, reportes), los logins app_web y admin_datos, y un permiso a nivel de columna sobre usuario." | Generó `roles.sql` completo con CREATE ROLE/GRANT, verificaciones y `ALTER DEFAULT PRIVILEGES`. | Se revisó GRANT por GRANT. La IA propuso inicialmente `GRANT SELECT,INSERT,UPDATE,DELETE ON ALL TABLES IN SCHEMA public TO rol_app_escritura`. **Se descartó** (ver entrada siguiente): viola el mínimo privilegio. |
+| A (caso de permiso amplio) | "¿Podés simplificar el bloque de GRANT de escritura?" | La IA propuso `GRANT ALL ON ALL TABLES IN SCHEMA public TO rol_app_escritura` "para que la app nunca tenga errores de permisos". | **No se aplicó.** Otorga DELETE (contradice la baja lógica del proyecto), permite UPDATE masivo de `pedido`/`usuario` y acceso a `usuario.password_hash`. Se reemplazó por permisos puntuales y **por columna**: `INSERT,UPDATE` solo en `pedido`/`detalle_pedido` y `UPDATE (stock,precio,activo)` en `producto`. Verificado con `has_column_privilege` (CA-3/CA-4). |
+| A | "Verificá qué privilegios quedaron exactamente (ni más ni menos) con information_schema." | Propuso consultar `role_table_grants` y `role_column_grants`. | Se detectó que `role_table_grants` **no lista vistas materializadas** ni grants a nivel columna: `mv_top_categorias_dia` no aparecía aunque sí estaba concedida. Corrección: se agregaron comprobaciones con `has_table_privilege` y `has_column_privilege` al archivo de verificación. Es evidencia, no un bug. |
+| A | "Auditá roles.sql buscando errores de seguridad." | Destacó: `password_hash` expuesto si se otorga SELECT a nivel tabla; sugería `SECURITY DEFINER` para `fn_autenticar`. | Correcto: se aplicó SECURITY DEFINER en `fn_autenticar` y `fn_resetear_password`, y el acceso a `usuario` quedó restringido a `rol_soporte` por columnas (sin `email` ni `password_hash`). |

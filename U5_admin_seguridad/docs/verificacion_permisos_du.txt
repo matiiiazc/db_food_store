@@ -1,0 +1,60 @@
+     Listado de roles
+ Nombre de rol | Atributos 
+---------------+-----------
+
+                               Listado de roles
+   Nombre de rol   |                         Atributos                         
+-------------------+-----------------------------------------------------------
+ admin_datos       | 
+ app_web           | 
+ postgres          | Superusuario, Crear rol, Crear BD, Replicacin, Ignora RLS
+ reportes_app      | 
+ rol_app_escritura | No puede conectarse
+ rol_app_lectura   | No puede conectarse
+ rol_reportes      | No puede conectarse
+ rol_soporte       | No puede conectarse
+ soporte_app       | 
+
+      grantee      |        table_name        |  privileges   
+-------------------+--------------------------+---------------
+ rol_app_escritura | detalle_pedido           | INSERT,UPDATE
+ rol_app_escritura | pedido                   | INSERT,UPDATE
+ rol_app_lectura   | categoria                | SELECT
+ rol_app_lectura   | cliente                  | SELECT
+ rol_app_lectura   | deposito                 | SELECT
+ rol_app_lectura   | detalle_pedido           | SELECT
+ rol_app_lectura   | lote                     | SELECT
+ rol_app_lectura   | pedido                   | SELECT
+ rol_app_lectura   | producto                 | SELECT
+ rol_reportes      | categoria                | SELECT
+ rol_reportes      | cliente                  | SELECT
+ rol_reportes      | detalle_pedido           | SELECT
+ rol_reportes      | pedido                   | SELECT
+ rol_reportes      | producto                 | SELECT
+ rol_reportes      | vista_pedidos_cliente    | SELECT
+ rol_reportes      | vista_productos_vigentes | SELECT
+(16 filas)
+
+   grantee   | column_name | privilege_type 
+-------------+-------------+----------------
+ rol_soporte | activo      | SELECT
+ rol_soporte | activo      | UPDATE
+ rol_soporte | fecha_alta  | SELECT
+ rol_soporte | id          | SELECT
+ rol_soporte | nombre      | SELECT
+ rol_soporte | nombre      | UPDATE
+ rol_soporte | rol         | SELECT
+(7 filas)
+
+                         ?column?                         
+----------------------------------------------------------
+ mv_top_categorias_dia: rol_reportes SELECT = true
+ producto UPDATE nivel tabla rol_app_escritura = false
+ producto UPDATE columna stock = true
+ producto UPDATE columna nombre = false
+ usuario SELECT columna email rol_soporte = false
+ usuario UPDATE columna password_hash rol_soporte = false
+(6 filas)
+
+SET
+RESET
