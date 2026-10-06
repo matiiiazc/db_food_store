@@ -1,0 +1,37 @@
+FRAGMENTO DE LOG ANONIMIZADO — U5 Parte C (simulacro de incidente)
+Fuente: log nativo del motor (log_connections/log_disconnections=on, log_statement=mod),
+reencodificado y ANONIMIZADO ANTES de entregarse a un asistente de IA.
+
+Anonimización aplicada (mapping determinista, conforme al criterio usuario_anon):
+  app_web            -> u_aplicacion        (identidad de bajo privilegio)
+  admin_datos        -> rol_administrador_datos
+  web@foodstore.local -> cuenta_a@anon.local
+  rutas de pg_hba    -> <ruta_pg_hba>
+================================================================================
+
+[A] Log del motor (secuencia)
+
+2026-10-06 19:00:24 -03 LOG:  conexión recibida: host=127.0.0.1 port=P1
+2026-10-06 19:00:24 -03 LOG:  conexión autenticada: identidad="u_aplicacion" método=scram-sha-256 (<ruta_pg_hba>)
+2026-10-06 19:00:24 -03 LOG:  conexión autorizada: usuario=u_aplicacion base_de_datos=base_foodstore nombre_de_aplicación=psql
+2026-10-06 19:00:24 -03 ERROR:  permiso denegado a la tabla usuario
+2026-10-06 19:00:24 -03 SENTENCIA:  SELECT * FROM usuario;
+2026-10-06 19:00:24 -03 LOG:  sentencia: GRANT rol_administrador_datos TO u_aplicacion;
+2026-10-06 19:00:24 -03 ERROR:  se ha denegado el permiso para otorgar el rol "rol_administrador_datos"
+2026-10-06 19:00:24 -03 DETALLE:  Sólo los roles con la opción ADMIN en el rol "rol_administrador_datos" pueden otorgar este rol.
+2026-10-06 19:00:24 -03 ERROR:  permiso denegado a la tabla audit_login
+2026-10-06 19:00:24 -03 SENTENCIA:  SELECT to_char(tiempo, 'YYYY-MM-DD HH24:MI:SS') AS instante, email, exito FROM audit_login ORDER BY tiempo DESC LIMIT 10;
+2026-10-06 19:00:24 -03 LOG:  desconexión: duración de sesión: 0:00:00.135 usuario=u_aplicacion base=base_foodstore host=127.0.0.1 port=P1
+
+[B] Anexo: registros de intentos de autenticación (tabla audit_login, anonimizados)
+
+ instante                 | email             | exito
+--------------------------+-------------------+-------
+ 2026-10-06 19:00:24 -03  | cuenta_a@anon.local | f
+ 2026-10-06 19:00:24 -03  | cuenta_a@anon.local | f
+ 2026-10-06 19:00:24 -03  | cuenta_a@anon.local | f
+ 2026-10-06 19:00:24 -03  | cuenta_a@anon.local | f
+ 2026-10-06 19:00:24 -03  | cuenta_a@anon.local | f
+ 2026-10-06 19:00:24 -03  | cuenta_a@anon.local | f
+ 2026-10-06 19:00:24 -03  | cuenta_a@anon.local | f
+ 2026-10-06 19:00:24 -03  | cuenta_a@anon.local | t
