@@ -1,0 +1,34 @@
+== BASE: snapshot/ cache recargados desde servidor_snapshot.csv (copia del servidor) ==
+
+== C2 ==
+Comando: exportar nueva instantánea con prod 1 precio_centavos 124984->129984; correr semaforo
+Resultado: ('C2-sol-0001-0001-000000000001', 'C2-borr-0001-0001-000000000001', 'CONFLICTO', 'precio cambiado (conflicto)')
+Explicación: el precio actual (129984) difiere del visto (124984) sin otros problemas -> CONFLICTO (amarillo).
+Comando: cliente acepta -> UPDATE precio_centavos_visto=129984; INSERT nueva solicitud C2-sol-0002 (PENDIENTE); correr semaforo
+Resultado: ('C2-sol-0002-0002-000000000002', 'C2-borr-0001-0001-000000000001', 'SIMULADO_APROBADO', 'todo coincide con el servidor')
+Explicación: con el precio actualizado ya todo coincide -> SIMULADO_APROBADO (verde).
+
+== C3 ==
+Comando: instantánea con prod 1 stock=50; borrador pide 200; correr semaforo
+Resultado: ('C3-sol-0001-0001-000000000001', 'C3-borr-0001-0001-000000000001', 'RECHAZADO', 'stock insuficiente')
+Explicación: cantidad (200) > stock disponible (50) -> RECHAZADO (rojo).
+
+== C4 ==
+Comando: instantánea con prod 6 dado de baja (eliminado=1, disponible=0); correr semaforo
+Resultado: ('C4-sol-0001-0001-000000000001', 'C4-borr-0001-0001-000000000001', 'RECHAZADO', 'producto no disponible o dado de baja')
+Explicación: producto no disponible/dado de baja -> RECHAZADO (rojo).
+Recarga catálogo: aparece en disponibles? NO | la fila queda en cache: (6, 0, 1)
+Explicación: al recargar desde la instantánea el producto no aparece en el catálogo disponible, pero la fila permanece (baja lógica).
+
+== C5 ==
+Comando: borrador con precios/cantidades/stock coincidentes con la instantánea; correr semaforo
+Resultado: ('C5-sol-0001-0001-000000000001', 'C5-borr-0001-0001-000000000001', 'SIMULADO_APROBADO', 'todo coincide con el servidor')
+Explicación: sin diferencias de precio ni problemas de stock/disponibilidad -> SIMULADO_APROBADO (verde).
+
+== C6 ==
+Primera evaluación: ('C6-sol-0001-0001-000000000001', 'C6-borr-0001-0001-000000000001', 'SIMULADO_APROBADO', 'todo coincide con el servidor')
+Comando: reinsertar solicitud_uuid repetido -> ERROR esperado: UNIQUE constraint failed: cola_sync.solicitud_uuid
+Comando: cambiar precio en snapshot y repetir semaforo (la solicitud ya no está PENDIENTE)
+Resultado tras repetir simulación: ('C6-sol-0001-0001-000000000001', 'C6-borr-0001-0001-000000000001', 'SIMULADO_APROBADO', 'todo coincide con el servidor')
+Explicación: el UUID duplicado falla por clave primaria (no se duplica) y el semáforo solo evalúa PENDIENTE, así que no reevalúa.
+Protección real (parada 8): la idempotencia se garantiza en el servidor con el solicitud_uuid como clave de idempotencia + restricción única/transacción al confirmar la venta, de modo que un reintento de red devuelva el mismo resultado sin duplicar pedidos ni afectar stock.
