@@ -1,6 +1,8 @@
 # TP8 — Food Store en la feria (Unidad 8)
 
-Base de la tablet en **SQLite** + simulación de sincronización (semáforo) contra **PostgreSQL** + cierre de la capa de datos. La tablet **solo consulta y arma borradores**: precio, stock y ventas los decide PostgreSQL (`SIMULADO_APROBADO` no es una venta). Todo con datos inventados, sin credenciales reales.
+**Repositorio:** https://github.com/matiiiazc/db_food_store · **Integrantes:** *(completar)*
+
+Base de la tablet en **SQLite** + simulación de sincronización (semáforo) contra **PostgreSQL** + cierre de la capa de datos. La tablet **solo consulta y arma borradores**: precio, stock y ventas los decide PostgreSQL (`SIMULADO_APROBADO` no es una venta). Todo con datos inventados, sin credenciales reales. **Evidencias:** salidas de ejecución reales (`movil/evidencia_*.txt`).
 
 ## Estructura
 - `movil/schema_sqlite.sql` — esquema SQLite (FK ON, 4 tablas STRICT).
