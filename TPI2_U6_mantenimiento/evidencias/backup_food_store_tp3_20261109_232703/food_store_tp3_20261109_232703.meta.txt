@@ -1,0 +1,11 @@
+timestamp=20261109_232703
+source_db=food_store_tp3
+host=127.0.0.1
+port=5432
+user=postgres
+pg_dump_version=pg_dump (PostgreSQL) 18.4
+dump_file=food_store_tp3_20261109_232703.dump
+dump_bytes=14485062
+sha256_file=food_store_tp3_20261109_232703.sha256
+list_file=food_store_tp3_20261109_232703.list.txt
+nota=pg_dump es lectura del origen; no modifica food_store_tp3. Pruebas de restore NO ejecutadas por este script.

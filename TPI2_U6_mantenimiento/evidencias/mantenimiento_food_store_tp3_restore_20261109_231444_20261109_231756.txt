@@ -1,0 +1,6 @@
+timestamp=20261109_231756
+base=food_store_tp3_restore_20261109_231444
+integridad=ejecutada(ver log)
+analyze=ejecutado
+vacuum=False
+NOTA: revisar el log/evidencia; no se afirman resultados correctos sin inspeccion humana.

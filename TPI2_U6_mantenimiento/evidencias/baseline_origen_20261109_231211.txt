@@ -1,0 +1,7 @@
+now|2026-11-09 23:12:11.352971-03
+size_bytes|222975679
+detalle_pedido|601205
+categoria|4
+pedido|200401
+producto|50000
+cliente|20000
