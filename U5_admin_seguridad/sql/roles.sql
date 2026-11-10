@@ -167,8 +167,15 @@ GRANT EXECUTE ON FUNCTION fn_resetear_password(p_email TEXT, p_password TEXT)
 -- sin acceso a tablas nuevas por parte de app a menos que se explicite).
 ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public
     GRANT SELECT ON TABLES TO rol_app_lectura, rol_soporte, rol_reportes;
+-- CORRECCION (code review entrega 2, hallazgo CR-03): el default incluia DELETE
+-- para rol_app_escritura en tablas futuras, contradiciendo la politica R7 de
+-- baja logica (los GRANT explicitos de arriba solo otorgan INSERT, UPDATE).
+-- Verificado en pg_default_acl: quedaba 'awd'; se corrige a 'aw'. El cambio es
+-- metadata-only (default privileges afectan solo tablas FUTURAS) y reversible.
 ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public
-    GRANT INSERT, UPDATE, DELETE ON TABLES TO rol_app_escritura;
+    GRANT INSERT, UPDATE ON TABLES TO rol_app_escritura;
+ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public
+    REVOKE DELETE ON TABLES FROM rol_app_escritura;
 ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public
     GRANT EXECUTE ON FUNCTIONS TO rol_app_lectura, rol_soporte, rol_reportes;
 

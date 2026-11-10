@@ -75,6 +75,14 @@ INSERT INTO responsable_deposito ... SELECT DISTINCT responsable_control_id, dep
 
 Ambos `EXCEPT` dan **0 filas**: la vista de compatibilidad reproduce la instancia original.
 
+### g) Migración transaccional reversible y plan de reversión (objetivo oficial U4, 2ª entrega)
+
+`04_migracion_transaccional_reversible.sql` (especificado en `specs/kiro_fnbc/`) envuelve la migración en transacciones reversibles y fue probado **con corrida real** (evidencia: `evidencia/04_migracion_transaccional_20261109_235808.txt`, 0,68 s) sobre una copia restaurada de un dump verificado (`food_store_tp3_u4_fnbc_20261109_235630`; el original `food_store_tp3` nunca fue destino — el script tiene guarda que lo bloquea):
+
+- **Corrida A (COMMIT verificado):** `BEGIN` → recreación de R1/R2 + vista → `INSERT ... SELECT` desde `control_lote_almacen` (solo lectura) → bloque `DO` que verifica `EXCEPT = 0` en ambos sentidos **dentro de la transacción** → `COMMIT` (última sentencia: solo se alcanza si la verificación pasó). Resultado: `VERIFICACION OK: EXCEPT=0 en ambos sentidos (filas en vista=3)`.
+- **Corrida B (ROLLBACK demostrado):** se replica la migración desde una copia **temporal** del origen contaminada con `(501,31,801)`, fila que viola la DF `ResponsableControlID → DepositoID` (801 ya tiene el depósito 30). El esquema FNBC **no tiene dónde guardar el dato inválido**: `responsable_deposito_pkey` rechaza al responsable 801 duplicado (`llave duplicada viola restricción de unicidad «responsable_deposito_pkey»`), la transacción aborta a mitad de migración y el `ROLLBACK` restaura el estado previo exacto — incluido el DDL, transaccional en PostgreSQL. Verificación post-rollback: las 3 tablas y la vista con las mismas filas que antes (`3/3/2/3`) y `control_lote_almacen` con su instancia intacta.
+- **Plan de reversión obligatorio** (`specs/kiro_fnbc/design.md` §6): como la migración solo **lee** `control_lote_almacen` (nunca lo borra ni actualiza), revertir tras un `COMMIT` es eliminar los objetos derivados (vista + R1/R2, con opción conservadora de renombrarlas `*_deprecada` para auditoría) sin pérdida de datos; a mitad de migración, basta `ROLLBACK` (demostrado en la Corrida B).
+
 ---
 
 ## Parte 2 — Desnormalización controlada del panel (top 5 del día)
